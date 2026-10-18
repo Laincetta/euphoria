@@ -460,8 +460,18 @@ def client_callback(q):
 def client_message(chat, text, m):
     l = client_leads(chat)
     l = l[0] if l else None
-    if not l or not cfg.get("CHAT_ID"):
+    if not cfg.get("CHAT_ID"):
         return client_hello(chat)
+    if not l:  # человек нашёл бота сам, без заявки — всё равно передаём админу
+        u = m.get("from") or {}
+        name = " ".join(x for x in [u.get("first_name"), u.get("last_name")] if x) or "Без имени"
+        nick = f" @{u['username']}" if u.get("username") else ""
+        r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Сообщение в бот (без заявки) от {name}{nick}:\n{text}\n\n"
+                                                                   "Ответьте на это сообщение — ответ уйдёт этому человеку."})
+        if r.get("ok"):
+            map_msg(r["result"]["message_id"], f"chat:{chat}", "fwd")
+        tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда.", "reply_markup": menu_kb()})
+        return
     notify_admin(l, f"{who(l)} пишет:\n{text}")
     tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда."})
 
@@ -474,6 +484,10 @@ def admin_reply(chat, text, reply_to):
             mm = {"lead_id": row["id"], "kind": "ask"} if row else None
     if not mm:
         return False
+    if str(mm["lead_id"]).startswith("chat:"):
+        r = tg("sendMessage", {"chat_id": mm["lead_id"][5:], "text": f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}"})
+        tg("sendMessage", {"chat_id": chat, "text": "Отправлено ✓" if r.get("ok") else "Не получилось отправить."})
+        return True
     l = get_lead(mm["lead_id"])
     if mm["kind"] == "fwd":
         ok = to_client(l, f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}")
@@ -771,8 +785,12 @@ def handle_update(u):
         send_upcoming(chat, {"/today": "today", "/tomorrow": "tomorrow", "/week": "week"}.get(text.split("@")[0], "all"))
     elif text.startswith("/report") and is_admin:
         tg("sendMessage", {"chat_id": chat, "text": report_text(), "parse_mode": "HTML", "disable_web_page_preview": True})
-    elif not is_admin and not text.startswith("/"):
-        client_message(chat, text[:1000], m)
+    elif not text.startswith("/"):
+        if not is_admin or client_leads(chat):  # админ, проверяющий запись на себе, тоже пишет «как клиент»
+            client_message(chat, text[:1000], m)
+        else:
+            tg("sendMessage", {"chat_id": chat, "text": "Чтобы ответить клиенту, нажмите «Ответить» на его сообщении или на заявке. "
+                                                       "Записи — /upcoming, сводка — /report."})
 
 
 def poll_loop():
