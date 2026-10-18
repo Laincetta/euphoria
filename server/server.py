@@ -133,8 +133,16 @@ def init_db():
         # какое сообщение в чате админа к какой заявке относится: вопрос о времени, пересланное сообщение клиента
         con.execute("CREATE TABLE IF NOT EXISTS msgmap(admin_msg INTEGER PRIMARY KEY, lead_id TEXT, kind TEXT)")
         # вопросы клиентов админу: кто, что спросил, ответили ли
+        con.execute("""CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, chat TEXT, lead_id TEXT,
+            name TEXT, phone TEXT, dir TEXT, text TEXT, handled INTEGER DEFAULT 0)""")
         con.execute("""CREATE TABLE IF NOT EXISTS questions(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, chat TEXT, lead_id TEXT,
             name TEXT, phone TEXT, text TEXT, answered_at TEXT, answer TEXT)""")
+        if not con.execute("SELECT 1 FROM messages LIMIT 1").fetchone():  # перенос вопросов из прошлой версии в диалоги
+            for q in con.execute("SELECT * FROM questions ORDER BY at").fetchall():
+                con.execute("INSERT INTO messages(at,chat,lead_id,name,phone,dir,text,handled) VALUES(?,?,?,?,?,'in',?,?)",
+                            (q[1], q[2], q[3], q[4], q[5], q[6], 1 if q[7] else 0))
+                if q[8] and q[8] != "(отмечено вручную)":
+                    con.execute("INSERT INTO messages(at,chat,name,dir,text,handled) VALUES(?,?,'Администратор','out',?,1)", (q[7], q[2], q[8]))
 
 
 def norm_handle(contact, s):
@@ -315,7 +323,7 @@ def cb(text, data):
 
 
 def menu_kb():
-    rows = [[cb("Моя запись", "c:my")], [cb("Написать администратору", "c:ask")],
+    rows = [[cb("Моя запись", "c:my")], [cb("Задать вопрос администратору", "c:ask")],
             [{"text": "Как добраться", "url": route_url()}]]
     if cfg.get("SITE_URL"):
         rows.insert(1, [{"text": "Записаться на сайте", "url": cfg["SITE_URL"]}])
@@ -392,12 +400,12 @@ def client_hello(chat):
             "Здесь приходят подтверждения записи и напоминания. Можно посмотреть свою запись, перенести или отменить её "
             "и написать администратору.")
     tg("sendMessage", {"chat_id": chat, "text": text, "reply_markup": menu_kb() if not l else
-                       {"inline_keyboard": [[cb("Моя запись", "c:my")], [cb("Написать администратору", "c:ask")],
+                       {"inline_keyboard": [[cb("Моя запись", "c:my")], [cb("Задать вопрос администратору", "c:ask")],
                                             [{"text": "Как добраться", "url": route_url()}]]}})
 
 
 def notify_admin(l, text, fwd=True):
-    """Сообщение админу о действии клиента. fwd=True — это вопрос: попадает в «Вопросы от клиентов», под ним «Ответить»."""
+    """Сообщение админу о действии клиента. fwd=True — это сообщение клиента: попадает в «Диалоги», под ним «Ответить»."""
     if not cfg.get("CHAT_ID"):
         return
     if fwd:
@@ -405,24 +413,47 @@ def notify_admin(l, text, fwd=True):
     tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": text})
 
 
+def dlg_kb(chat):
+    return {"inline_keyboard": [[{"text": "Ответить", "callback_data": f"rp:d{chat}"},
+                                 {"text": "Открыть диалог", "callback_data": f"dl:open:{chat}"}]]}
+
+
 def add_question(chat, l, name, phone, text, header=None):
+    """Входящее сообщение клиента: в историю диалога + уведомление админу."""
     with db_lock, db() as con:
-        cur = con.execute("INSERT INTO questions(at,chat,lead_id,name,phone,text) VALUES(?,?,?,?,?,?)",
-                          (datetime.now(timezone.utc).isoformat(), str(chat or ""), l["id"] if l else None, name, phone, text))
-        qid = cur.lastrowid
-    head = header or (f"Вопрос от {name}" + (f", {nice_phone(phone)}" if phone else ""))
-    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"{head}\n\n{text}", "reply_markup": reply_btn(f"q{qid}")})
+        con.execute("INSERT INTO messages(at,chat,lead_id,name,phone,dir,text,handled) VALUES(?,?,?,?,?,'in',?,0)",
+                    (datetime.now(timezone.utc).isoformat(), str(chat or ""), l["id"] if l else None, name, phone, text))
+    head = header or (f"Новое сообщение от {name}" + (f", {nice_phone(phone)}" if phone else ""))
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"{head}\n\n{text}", "reply_markup": dlg_kb(chat)})
     if r.get("ok"):
-        map_msg(r["result"]["message_id"], f"q{qid}", "fwd")
-    log(f"Вопрос #{qid} от {name}:", "передан админу" if r.get("ok") else "НЕ передан — " + str(r.get("description")))
+        map_msg(r["result"]["message_id"], f"d{chat}", "fwd")
+    log(f"Сообщение от {name}:", "передано админу" if r.get("ok") else "НЕ передано — " + str(r.get("description")))
     return r.get("ok")
 
 
-def get_question(target):
-    if not str(target).startswith("q") or not str(target)[1:].isdigit():
-        return None
+def resolve_target(target):
+    """Кому отвечаем → chat_id клиента. Цели: d<chat>, q<id> (старые вопросы), chat:<id>, id заявки."""
+    t = str(target)
+    if t.startswith("d"):
+        return t[1:]
+    if t.startswith("chat:"):
+        return t[5:]
+    if t.startswith("q") and t[1:].isdigit():
+        with db_lock, db() as con:
+            row = con.execute("SELECT chat FROM questions WHERE id=?", (int(t[1:]),)).fetchone()
+        return row["chat"] if row else None
+    l = get_lead(t)
+    return l["client_chat"] if l else None
+
+
+def dialog_person(chat):
+    """Имя и телефон собеседника — из последнего его сообщения или из заявки."""
     with db_lock, db() as con:
-        return con.execute("SELECT * FROM questions WHERE id=?", (int(str(target)[1:]),)).fetchone()
+        m = con.execute("SELECT name, phone, lead_id FROM messages WHERE chat=? AND dir='in' ORDER BY at DESC LIMIT 1", (str(chat),)).fetchone()
+        l = con.execute("SELECT * FROM leads WHERE client_chat=? ORDER BY created_at DESC LIMIT 1", (str(chat),)).fetchone()
+    name = (m["name"] if m else None) or (l["name"] if l else "Клиент")
+    phone = (m["phone"] if m and m["phone"] else None) or (l["phone"] if l else "")
+    return name, phone, l
 
 
 def reply_btn(target, label="Ответить"):
@@ -431,70 +462,119 @@ def reply_btn(target, label="Ответить"):
 
 def ask_reply(target):
     """Админ нажал «Ответить» — бот открывает поле ответа; следующий текст уйдёт клиенту."""
-    q = get_question(target)
-    if q:
-        name = f"{q['name']}" + (f" ({nice_phone(q['phone'])})" if q["phone"] else "")
-        quote = q["text"] if len(q["text"]) < 300 else q["text"][:300] + "…"
-        text = f"Ответ для {name} на сообщение:\n«{quote}»\n\nНапишите ответ и отправьте."
-    elif str(target).startswith("chat:"):
-        text = "Напишите ответ и отправьте."
-    else:
-        l = get_lead(target)
-        if not l:
-            return
-        text = f"Ответ для {l['name']} ({nice_phone(l['phone'])}). Напишите и отправьте."
-    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": text,
-                           "reply_markup": {"force_reply": True, "input_field_placeholder": "Ответ клиенту"}})
+    chat = resolve_target(target)
+    if not chat:
+        return tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": "Этот клиент не подключал бота — написать ему можно только по телефону."})
+    name, phone, _ = dialog_person(chat)
+    with db_lock, db() as con:
+        last = con.execute("SELECT text FROM messages WHERE chat=? AND dir='in' ORDER BY at DESC LIMIT 1", (str(chat),)).fetchone()
+    quote = f"\nПоследнее сообщение: «{last['text'][:300]}»" if last else ""
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Ответ для {name}" + (f", {nice_phone(phone)}" if phone else "") +
+                           f".{quote}\n\nНапишите ответ и отправьте.",
+                           "reply_markup": {"force_reply": True, "input_field_placeholder": f"Ответ для {name}"[:64]}})
     if r.get("ok"):
-        map_msg(r["result"]["message_id"], target, "fwd")
+        map_msg(r["result"]["message_id"], f"d{chat}", "fwd")
 
 
 def send_answer(target, text):
     """Ответ админа клиенту. Возвращает (ok, кому)."""
-    q = get_question(target)
-    if q:
-        chat, name = q["chat"], q["name"]
-    elif str(target).startswith("chat:"):
-        chat, name = str(target)[5:], "клиенту"
-    else:
-        l = get_lead(target)
-        chat, name = (l["client_chat"] if l else None), (l["name"] if l else "клиенту")
+    chat = resolve_target(target)
+    name = dialog_person(chat)[0] if chat else "клиенту"
     if not chat:
-        log("Ответ админа: у клиента нет чата с ботом —", name)
+        log("Ответ админа: у клиента нет чата с ботом")
         return False, name
     r = tg("sendMessage", {"chat_id": chat, "text": f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}",
-                           "reply_markup": {"inline_keyboard": [[cb("Ответить администратору", "c:ask"), cb("Меню", "c:menu")]]}})
+                           "reply_markup": {"inline_keyboard": [[cb("Задать вопрос администратору", "c:ask")], [cb("Меню", "c:menu")]]}})
     if r.get("ok"):
         with db_lock, db() as con:
-            if q:
-                con.execute("UPDATE questions SET answered_at=?, answer=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), text, q["id"]))
-            else:  # ответ без конкретного вопроса закрывает все открытые вопросы этого клиента
-                con.execute("UPDATE questions SET answered_at=?, answer=? WHERE chat=? AND answered_at IS NULL",
-                            (datetime.now(timezone.utc).isoformat(), text, str(chat)))
+            con.execute("INSERT INTO messages(at,chat,lead_id,name,phone,dir,text,handled) VALUES(?,?,NULL,?,NULL,'out',?,1)",
+                        (datetime.now(timezone.utc).isoformat(), str(chat), "Администратор", text))
+            con.execute("UPDATE messages SET handled=1 WHERE chat=? AND dir='in'", (str(chat),))
     log("Ответ админа →", name, "доставлен" if r.get("ok") else "НЕ доставлен — " + str(r.get("description")))
     return r.get("ok"), name
 
 
-def questions_text():
+def when_short(iso):
+    x = datetime.fromisoformat(iso).astimezone(MSK)
+    d = (datetime.now(MSK).date() - x.date()).days
+    return x.strftime("%H:%M") if d == 0 else ("вчера " + x.strftime("%H:%M")) if d == 1 else x.strftime("%d.%m %H:%M")
+
+
+PAGE = 8
+
+
+def dialogs_view(page=0):
+    """Список диалогов: сначала ждущие ответа, затем по свежести."""
     with db_lock, db() as con:
-        open_q = con.execute("SELECT * FROM questions WHERE answered_at IS NULL ORDER BY at").fetchall()
-        done = con.execute("SELECT * FROM questions WHERE answered_at IS NOT NULL ORDER BY answered_at DESC LIMIT 5").fetchall()
-    out = ["<b>Вопросы от клиентов</b>", f"Без ответа: {len(open_q)}" if open_q else "Все вопросы отвечены."]
-    for i, q in enumerate(open_q[:10], 1):
-        out += ["", f"<b>{i}. {esc(q['name'])}</b>" + (f", {nice_phone(q['phone'])}" if q["phone"] else "") + f" · {fmt_time(q['at'])}",
-                esc(q["text"] if len(q["text"]) < 400 else q["text"][:400] + "…")]
-    if len(open_q) > 10:
-        out += ["", f"…и ещё {len(open_q) - 10}"]
-    if done:
-        out += ["", "<b>Недавно отвечены</b>"]
-        for q in done:
-            out.append(f"{esc(q['name'])}: «{esc(q['text'][:60])}» → «{esc((q['answer'] or '')[:60])}»")
-    kb = [[{"text": f"Ответить: {i}. {q['name'][:20]}", "callback_data": f"rp:q{q['id']}"}] for i, q in enumerate(open_q[:10], 1)]
-    kb += [[{"text": f"Отметить все отвеченными ({len(open_q)})", "callback_data": "qa:all"}]] if open_q else []
-    return "\n".join(out)[:4000], {"inline_keyboard": kb + [[{"text": "Обновить", "callback_data": "qa:refresh"}]]}
+        chats = con.execute("""SELECT chat, MAX(at) AS last_at, SUM(CASE WHEN dir='in' AND handled=0 THEN 1 ELSE 0 END) AS waiting
+                               FROM messages WHERE chat<>'' GROUP BY chat
+                               ORDER BY (SUM(CASE WHEN dir='in' AND handled=0 THEN 1 ELSE 0 END) > 0) DESC, MAX(at) DESC""").fetchall()
+        lasts = {r["chat"]: r for r in con.execute(
+            "SELECT m.* FROM messages m JOIN (SELECT chat, MAX(at) AS a FROM messages GROUP BY chat) x ON m.chat=x.chat AND m.at=x.a")}
+    waiting = sum(1 for c in chats if c["waiting"])
+    out = ["<b>Диалоги с клиентами</b>",
+           (f"Ждут ответа: {waiting}" if waiting else "Все ответы отправлены.") if chats else "Пока никто не писал."]
+    part = chats[page * PAGE:(page + 1) * PAGE]
+    kb = []
+    for i, c in enumerate(part, page * PAGE + 1):
+        name, phone, _ = dialog_person(c["chat"])
+        last = lasts.get(c["chat"])
+        preview = ("Вы: " if last and last["dir"] == "out" else "") + (last["text"] if last else "")
+        preview = preview if len(preview) <= 70 else preview[:69] + "…"
+        mark = f" — ждёт ответа ({c['waiting']})" if c["waiting"] else ""
+        out += ["", f"<b>{i}. {esc(name)}</b>" + (f", {nice_phone(phone)}" if phone else "") + f" · {when_short(c['last_at'])}{mark}",
+                f"   {esc(preview)}"]
+        kb.append([{"text": f"{i}. {name[:24]}" + (" — ждёт ответа" if c["waiting"] else ""), "callback_data": f"dl:open:{c['chat']}"}])
+    nav = []
+    if page > 0:
+        nav.append({"text": "← Назад", "callback_data": f"dl:list:{page - 1}"})
+    if (page + 1) * PAGE < len(chats):
+        nav.append({"text": "Ещё →", "callback_data": f"dl:list:{page + 1}"})
+    kb += [nav] if nav else []
+    kb.append([{"text": "Обновить", "callback_data": f"dl:list:{page}"}])
+    return "\n".join(out)[:4000], {"inline_keyboard": kb}
 
 
-ADMIN_KB = {"keyboard": [[{"text": "Записи"}, {"text": "Вопросы от клиентов"}], [{"text": "Сводка"}]],
+def dialog_view(chat):
+    name, phone, l = dialog_person(chat)
+    with db_lock, db() as con:
+        msgs = con.execute("SELECT * FROM messages WHERE chat=? ORDER BY at DESC LIMIT 20", (str(chat),)).fetchall()[::-1]
+        waiting = con.execute("SELECT COUNT(*) FROM messages WHERE chat=? AND dir='in' AND handled=0", (str(chat),)).fetchone()[0]
+    out = [f"<b>Диалог: {esc(name)}</b>" + (f", {nice_phone(phone)}" if phone else "")]
+    if l:
+        st = STATUS.get(l["status"], l["status"])
+        when = fmt_appt(l["appt_at"]) if l["appt_at"] else f"хочет {fmt_day(l['day'])}"
+        out.append(f"Заявка: {esc(services_line(l))} · {esc(when)} · {st}")
+    out.append("—" * 12)
+    for m in msgs:
+        who_ = "Вы" if m["dir"] == "out" else esc(name)
+        out += ["", f"<b>{who_}</b> · {when_short(m['at'])}", esc(m["text"])]
+    if not msgs:
+        out += ["", "Сообщений пока нет."]
+    text = "\n".join(out)
+    while len(text) > 4000 and len(out) > 6:  # длинная переписка — убираем самые старые сообщения
+        del out[3:6]
+        text = "\n".join(out)
+    kb = [[{"text": "Ответить", "callback_data": f"rp:d{chat}"}]]
+    if waiting:
+        kb.append([{"text": "Отметить как отвеченный", "callback_data": f"dl:done:{chat}"}])
+    kb.append([{"text": "← Все диалоги", "callback_data": "dl:list:0"}, {"text": "Обновить", "callback_data": f"dl:open:{chat}"}])
+    return text, {"inline_keyboard": kb}
+
+
+def dialog_callback(q):
+    parts = q["data"].split(":")
+    act, arg = parts[1], (parts[2] if len(parts) > 2 else "0")
+    mid = q["message"]["message_id"]
+    if act == "done":
+        with db_lock, db() as con:
+            con.execute("UPDATE messages SET handled=1 WHERE chat=? AND dir='in'", (arg,))
+        act = "open"
+    text, kb = dialog_view(arg) if act == "open" else dialogs_view(int(arg) if arg.isdigit() else 0)
+    tg("editMessageText", {"chat_id": cfg["CHAT_ID"], "message_id": mid, "text": text, "parse_mode": "HTML", "reply_markup": kb})
+
+
+ADMIN_KB = {"keyboard": [[{"text": "Записи"}, {"text": "Диалоги"}], [{"text": "Сводка"}]],
             "resize_keyboard": True, "is_persistent": True}
 
 
@@ -518,7 +598,7 @@ def client_callback(q):
         return client_hello(chat)
     if act == "ask":
         ans()
-        return tg("sendMessage", {"chat_id": chat, "text": "Напишите сообщение одним текстом — администратор ответит здесь."})
+        return tg("sendMessage", {"chat_id": chat, "text": "Напишите ваш вопрос одним сообщением — администратор ответит здесь."})
     l = get_lead(lid) if lid else None
     if not l or l["client_chat"] != str(chat):
         return ans("Запись не найдена")
@@ -569,7 +649,7 @@ def client_message(chat, text, m):
         u = m.get("from") or {}
         name = " ".join(x for x in [u.get("first_name"), u.get("last_name")] if x) or "Без имени"
         nick = f" @{u['username']}" if u.get("username") else ""
-        ok = add_question(chat, None, name + nick, "", text, header=f"Вопрос от {name}{nick} (без заявки)")
+        ok = add_question(chat, None, name + nick, "", text, header=f"Новое сообщение от {name}{nick} (без заявки)")
     tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда." if ok else
                        f"Не получилось передать сообщение. Позвоните, пожалуйста: {salon_phone()}"})
 
@@ -585,7 +665,9 @@ def admin_reply(chat, text, reply_to):
     if mm["kind"] == "fwd":
         ok, name = send_answer(mm["lead_id"], text)
         tg("sendMessage", {"chat_id": chat, "text": f"Отправлено: {name}." if ok else
-                           f"Не получилось отправить ({name}): клиент не подключал бота. Позвоните ему."})
+                           f"Не получилось отправить ({name}): клиент не подключал бота. Позвоните ему.",
+                           **({"reply_markup": {"inline_keyboard": [[{"text": "Открыть диалог", "callback_data": f"dl:open:{resolve_target(mm['lead_id'])}"}]]}}
+                              if ok else {})})
         return True
     l = get_lead(mm["lead_id"])
     when = parse_appt(text, l["day"])
@@ -641,7 +723,7 @@ def set_commands():
     if cfg.get("CHAT_ID"):
         tg("setMyCommands", {"scope": {"type": "chat", "chat_id": int(cfg["CHAT_ID"])},
                              "commands": [{"command": "upcoming", "description": "Записи"},
-                                          {"command": "questions", "description": "Вопросы от клиентов"},
+                                          {"command": "dialogs", "description": "Диалоги с клиентами"},
                                           {"command": "report", "description": "Сводка по заявкам"},
                                           {"command": "update", "description": "Обновить сервер"}]})
 
@@ -813,15 +895,11 @@ def handle_update(u):
             ask_reply(q["data"][3:])
         tg("answerCallbackQuery", {"callback_query_id": q["id"]})
         return
-    if q and str(q.get("data", "")).startswith("qa:"):  # админ: список вопросов
+    if q and str(q.get("data", "")).startswith(("dl:", "qa:")):  # админ: диалоги с клиентами
         if str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
-            if q["data"] == "qa:all":
-                with db_lock, db() as con:
-                    con.execute("UPDATE questions SET answered_at=?, answer=COALESCE(answer,'(отмечено вручную)') WHERE answered_at IS NULL",
-                                (datetime.now(timezone.utc).isoformat(),))
-            text, kb = questions_text()
-            tg("editMessageText", {"chat_id": cfg["CHAT_ID"], "message_id": q["message"]["message_id"], "text": text,
-                                   "parse_mode": "HTML", "reply_markup": kb})
+            if q["data"].startswith("qa:"):
+                q["data"] = "dl:list:0"
+            dialog_callback(q)
         tg("answerCallbackQuery", {"callback_query_id": q["id"]})
         return
     if q and str(q.get("data", "")).startswith("c:"):
@@ -890,14 +968,14 @@ def handle_update(u):
         if is_admin:
             tg("sendMessage", {"chat_id": chat, "reply_markup": ADMIN_KB,
                                "text": "Вы администратор: сюда приходят заявки и вопросы клиентов.\n\n"
-                                       "Кнопки внизу: «Записи» — расписание, «Вопросы от клиентов» — на что ещё не ответили, «Сводка» — статистика.\n"
+                                       "Кнопки внизу: «Записи» — расписание, «Диалоги» — переписка с клиентами, «Сводка» — статистика.\n"
                                        "После «Подтвердил запись» бот спросит время — ответьте на его сообщение, и клиент получит подтверждение."})
         else:
             client_hello(chat)
     elif text.startswith("/update") and is_admin:
         threading.Thread(target=check_update, args=(True,), daemon=True).start()
-    elif is_admin and (text.split("@")[0] == "/questions" or text == "Вопросы от клиентов"):
-        qt, kb = questions_text()
+    elif is_admin and (text.split("@")[0] in ("/dialogs", "/questions") or text in ("Диалоги", "Вопросы от клиентов")):
+        qt, kb = dialogs_view()
         tg("sendMessage", {"chat_id": chat, "text": qt, "parse_mode": "HTML", "reply_markup": kb})
     elif is_admin and text == "Записи":
         send_upcoming(chat, "all")
@@ -913,7 +991,7 @@ def handle_update(u):
         else:
             tg("sendMessage", {"chat_id": chat, "reply_markup": ADMIN_KB,
                                "text": "Чтобы ответить клиенту, нажмите кнопку «Ответить» под его сообщением "
-                                       "или откройте «Вопросы от клиентов»."})
+                                       "или откройте «Диалоги»."})
 
 
 def poll_loop():
