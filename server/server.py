@@ -414,6 +414,47 @@ def all_leads(days=0):
     return rows
 
 
+def plural(n, one, few, many):
+    n = abs(n) % 100
+    return one if n % 10 == 1 and n != 11 else few if 2 <= n % 10 <= 4 and not 12 <= n <= 14 else many
+
+
+def lead_line(l):
+    """Одна заявка — одна строка: статус · когда пришла · имя · услуги · сумма · время записи или желаемый день."""
+    sv = json.loads(l["services"])
+    first = sv[0]["name"] if sv else "—"
+    first = first if len(first) <= 30 else first[:29] + "…"
+    more = f" +{len(sv) - 1}" if len(sv) > 1 else ""
+    when = ("🕒 " + fmt_appt(l["appt_at"])) if l["appt_at"] else ("хочет: " + fmt_day(l["day"]))
+    total = ("от " if l["total_from"] else "") + rub(l["total"]) + " ₽"
+    return (f"{MARK.get(l['status'], '•')} {fmt_time(l['created_at'])} · <b>{esc(l['name'])}</b> {esc(l['phone'])} · {esc(first)}{more} · "
+            f"{total} · {esc(when)}")
+
+
+def report_text():
+    def counts(days):
+        ls = all_leads(days)
+        c = lambda *s: sum(1 for l in ls if l["status"] in s)
+        money = sum(int(l["total"] or 0) for l in ls if l["status"] == "came")
+        return (f"<b>{days} дн:</b> {len(ls)} {plural(len(ls), 'заявка', 'заявки', 'заявок')} · ✅ {c('confirmed', 'came')} · 💚 {c('came')}"
+                f"{f' на {rub(money)} ₽' if money else ''} · 📵 {c('noanswer')} · ❌ {c('cancelled')} · 🆕 {c('new')}")
+    top = {}
+    for l in all_leads(30):
+        for s in json.loads(l["services"]):
+            top[s["name"]] = top.get(s["name"], 0) + 1
+    best = ", ".join(f"{esc(n)} ({c})" for n, c in sorted(top.items(), key=lambda x: -x[1])[:3]) or "—"
+    last = all_leads()[:20]
+    out = ["📊 <b>Сводка по заявкам</b>", counts(7), counts(30), f"Чаще выбирали за 30 дней: {best}", "",
+           f"<b>Последние {len(last)}:</b>" if last else "Заявок пока нет."]
+    out += [lead_line(l) for l in last]
+    out += ["", "🆕 новая · ✅ подтверждена · 💚 пришёл · 📵 не дозвонились · ❌ отмена"]
+    site = (cfg.get("SITE_URL") or "").rstrip("/")
+    out.append(f'<a href="{html.escape(site)}/admin?key={urllib.parse.quote(cfg["REPORT_KEY"])}">Все заявки таблицей</a>' if site
+               else "Все заявки таблицей — страница admin на сервере (ссылка в окне сервера).")
+    text = "\n".join(out)
+    return text if len(text) < 4000 else text[:3990] + "…"
+
+
 def summary(days):
     ls = all_leads(days)
     cnt = lambda s: sum(1 for l in ls if l["status"] == s)
@@ -486,7 +527,7 @@ def handle_update(u):
     elif text.startswith("/update") and is_admin:
         threading.Thread(target=check_update, args=(True,), daemon=True).start()
     elif text.startswith("/report") and is_admin:
-        tg("sendMessage", {"chat_id": chat, "text": summary(7) + "\n\n" + summary(30) + "\n\nПолный список: страница /admin на сервере."})
+        tg("sendMessage", {"chat_id": chat, "text": report_text(), "parse_mode": "HTML", "disable_web_page_preview": True})
     elif not is_admin and not text.startswith("/"):
         client_message(chat, text[:1000], m)
 
