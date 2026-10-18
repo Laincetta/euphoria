@@ -181,6 +181,7 @@ img{display:block}
 .route .sq{width:28px;height:28px;border-radius:8px;border:1px solid var(--line2);font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:center;flex:none}
 .route span:nth-child(2){flex:1}
 .route span:last-child{color:var(--muted)}
+.btn-gold{display:flex;align-items:center;justify-content:center;width:100%;height:54px;border-radius:14px;background:var(--gold);color:#111;font-weight:600;font-size:16px;text-decoration:none}
 .btn-line{height:48px;border-radius:12px;border:1px solid var(--line2);font-size:15px;font-weight:500;width:100%}
 
 .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:12px;scrollbar-width:none}
@@ -1888,7 +1889,7 @@ function closeStory() { clearTimeout(storyTimer); st.story = -1; $('story').clas
 const TITLES = ['', 'Ваша запись', 'Когда удобно', 'Контакты', 'Заявка отправлена'];
 function openBooking(enter) {
   closeStory();
-  st.bk = st.bk || { step: 1, day: 0, win: null, contact: 'call', sent: false };
+  st.bk = st.bk || { step: 1, day: 0, win: null, contact: null, sent: false };
   if (enter) st.bk.step = 1;
   $('bk').classList.add('on'); document.body.style.overflow = 'hidden';
   renderBooking(enter);
@@ -1898,14 +1899,16 @@ function canNext() {
   const b = st.bk;
   if (b.step === 1) return st.cart.length > 0;
   if (b.step === 2) return !!b.win;
-  if (b.step === 3) return st.name.trim().length > 1 && st.phone.replace(/\D/g, '').length >= 10;
+  if (b.step === 3) return st.name.trim().length > 1 && st.phone.replace(/\D/g, '').length >= 10 && !!b.contact;
   return true;
 }
 function windowsFor(day) { const hr = hrNow(); return WINDOWS.map((w) => Object.assign({}, w, { off: day === 0 && w.id !== 'any' && hr + 1 >= w.to })); }
 const CONTACTS = { call: 'позвонить', telegram: 'Telegram', max: 'MAX' };
 const HANDLE_FIELD = {
-  telegram: ['Ваш ник в Telegram', '@username', 'Ник есть в Telegram: Настройки → Имя пользователя. Можно оставить пустым — попробуем найти вас по номеру телефона.'],
-  max: ['Ваш ник или ссылка на профиль в MAX', 'ник или ссылка', 'Ник и личная ссылка есть в профиле MAX. Можно оставить пустым — попробуем найти вас по номеру телефона.'] };
+  max: ['Ваш ник или ссылка на профиль в MAX', 'ник или ссылка', 'Можно не указывать — найдём вас в MAX по номеру телефона.'] };
+const CONTACT_NOTE = {
+  telegram: 'После отправки нажмите «Включить уведомления» — откроется наш бот в Telegram. Туда придёт подтверждение и напоминание о записи.',
+  max: 'Администратор напишет вам в MAX: подтвердит время и напомнит о записи.' };
 function handle() { return st.bk && st.handles[st.bk.contact] ? st.handles[st.bk.contact].trim() : ''; }
 function requestText() {
   const b = st.bk, w = WINDOWS.find((x) => x.id === b.win) || {};
@@ -1922,6 +1925,8 @@ async function sendRequest() {
   if (endpoint) {
     const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!r.ok) throw new Error('сервер ответил ' + r.status);
+    const j = await r.json().catch(() => ({}));
+    b.botUrl = j.bot && j.start ? 'https://t.me/' + j.bot + '?start=' + encodeURIComponent(j.start) : '';
     b.sent = 'telegram';
   } else b.sent = 'demo';
 }
@@ -1945,13 +1950,16 @@ function renderBooking(enter) {
   } else if (b.step === 3) {
     body = '<label class="fld">Имя<input id="fName" autocomplete="given-name" placeholder="Как к вам обращаться" value="' + esc(st.name) + '"></label>' +
       '<label class="fld">Телефон<input id="fPhone" type="tel" autocomplete="tel" inputmode="tel" placeholder="+7 900 000-00-00" value="' + esc(st.phone) + '"></label>' +
-      '<div class="label caps">Как с вами связаться</div><div class="chips" style="padding:0">' + [['call', 'Позвонить'], ['telegram', 'Telegram'], ['max', 'MAX']].map(([k, n]) => '<button class="chip" aria-pressed="' + (b.contact === k) + '" data-a="bkContact" data-v="' + k + '">' + n + '</button>').join('') + '</div>' +
+      '<div class="label caps">Куда прислать подтверждение и напоминание</div><div class="chips" style="padding:0">' + [['telegram', 'Telegram'], ['max', 'MAX']].map(([k, n]) => '<button class="chip" aria-pressed="' + (b.contact === k) + '" data-a="bkContact" data-v="' + k + '">' + n + '</button>').join('') + '</div>' +
+      (b.contact ? '<p class="hint">' + CONTACT_NOTE[b.contact] + '</p>' : '<p class="hint" style="color:var(--gold)">Выберите мессенджер — без него не сможем прислать подтверждение.</p>') +
       (HANDLE_FIELD[b.contact] ? '<label class="fld">' + HANDLE_FIELD[b.contact][0] + '<input id="fHandle" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="' + HANDLE_FIELD[b.contact][1] + '" value="' + esc(st.handles[b.contact]) + '"></label><p class="hint" style="margin-top:-4px">' + HANDLE_FIELD[b.contact][2] + '</p>' : '') +
       '<label class="fld">Комментарий, если нужно<textarea id="fComment" placeholder="Например: хочу маникюр и педикюр одновременно">' + esc(st.comment) + '</textarea></label>' +
       '<p class="hint">Без предоплаты. Отправляя заявку, вы соглашаетесь на обработку персональных данных для связи с вами.</p>';
   } else {
     const w = WINDOWS.find((x) => x.id === b.win) || {};
-    body = '<div class="done"><span class="ok">' + I.check.replace('width="16" height="16"', 'width="34" height="34"') + '</span><h3>Заявка отправлена</h3><p>Администратор свяжется с вами' + ({ call: ' по телефону', telegram: ' в Telegram', max: ' в MAX' }[b.contact]) + ' и подтвердит точное время.</p>' +
+    body = '<div class="done"><span class="ok">' + I.check.replace('width="16" height="16"', 'width="34" height="34"') + '</span><h3>Заявка отправлена</h3>' + (b.contact === 'telegram' && b.botUrl
+        ? '<p><b style="color:var(--ink)">Остался один шаг:</b> откройте бота и нажмите «Начать». Туда придёт подтверждение времени и напоминание.</p><a class="btn-gold" href="' + esc(b.botUrl) + '" target="_blank" rel="noopener">Включить уведомления в Telegram</a>'
+        : '<p>Администратор свяжется с вами' + ({ telegram: ' в Telegram', max: ' в MAX' }[b.contact] || '') + ' и подтвердит точное время.</p>') +
       '<div class="note" style="width:100%;text-align:left">' + items.map((s) => esc(s.name)).join('<br>') + '<br><br><b>' + esc(dayLabel(b.day)) + ', ' + esc((w.name || '').toLowerCase()) + '</b> · ' + esc(S.addressShort) + '</div>' +
       '<button class="btn-line" data-a="route">Как добраться</button>' + (b.sent === 'telegram' ? '' : '<span class="hint">Демо-режим: заявка никуда не отправлена</span>') + '</div>';
   }

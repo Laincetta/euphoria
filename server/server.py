@@ -53,6 +53,11 @@ DEFAULT_CONFIG = {
     "CHAT_ID": "",
     "HOST": "0.0.0.0",
     "PORT": 8080,
+    "SALON_NAME": "Эйфория",
+    "SALON_ADDRESS": "Реутов, Парковая улица, 8",
+    "SALON_PHONE": "",
+    "SITE_URL": "",  # адрес страницы записи, когда сервер будет в интернете
+    "REVIEW_URL": "",  # ссылка на отзывы в Яндекс Картах — бот попросит отзыв после визита
     "TELEGRAM_API": "https://api.telegram.org",
     "UPDATE_REPO": "Laincetta/euphoria",  # пусто — обновления выключены
     "UPDATE_BRANCH": "main",
@@ -71,6 +76,7 @@ cfg = {}
 db_lock = threading.Lock()
 update_lock = threading.Lock()
 tg_offset = 0
+BOT = {"username": ""}
 rate = {}
 
 
@@ -106,8 +112,13 @@ def init_db():
         con.execute("""CREATE TABLE IF NOT EXISTS leads(
             id TEXT PRIMARY KEY, created_at TEXT, name TEXT, phone TEXT, services TEXT, total INTEGER, total_from INTEGER,
             day TEXT, win TEXT, contact TEXT, comment TEXT, status TEXT DEFAULT 'new', status_at TEXT, status_by TEXT, message_id INTEGER)""")
-        if "handle" not in [r[1] for r in con.execute("PRAGMA table_info(leads)")]:  # обновление старой базы
-            con.execute("ALTER TABLE leads ADD COLUMN handle TEXT")
+        have = [r[1] for r in con.execute("PRAGMA table_info(leads)")]
+        for col, typ in [("handle", "TEXT"), ("tok", "TEXT"), ("client_chat", "TEXT"), ("appt_at", "TEXT"),
+                         ("rem24", "INTEGER DEFAULT 0"), ("rem2", "INTEGER DEFAULT 0")]:  # обновление старой базы
+            if col not in have:
+                con.execute(f"ALTER TABLE leads ADD COLUMN {col} {typ}")
+        # какое сообщение в чате админа к какой заявке относится: вопрос о времени, пересланное сообщение клиента
+        con.execute("CREATE TABLE IF NOT EXISTS msgmap(admin_msg INTEGER PRIMARY KEY, lead_id TEXT, kind TEXT)")
 
 
 def norm_handle(contact, s):
@@ -122,7 +133,7 @@ def norm_handle(contact, s):
 def handle_html(l):
     h = l["handle"] or ""
     if not h:
-        return " · ник не указан, искать по номеру телефона" if l["contact"] in ("telegram", "max") else ""
+        return " · ник не указан, искать по номеру телефона" if l["contact"] == "max" else ""
     if l["contact"] == "telegram" and re.fullmatch(r"@[A-Za-z0-9_]{4,32}", h):
         return f' · <a href="https://t.me/{h[1:]}">{esc(h)}</a>'
     if re.match(r"https?://\S+$", h) or re.match(r"(web\.)?max\.ru/\S+$", h):
@@ -165,6 +176,36 @@ def fmt_day(d):
         return d
 
 
+def fmt_appt(iso):
+    x = datetime.fromisoformat(iso).astimezone(MSK)
+    return f"{DAYS[x.weekday()]}, {x.day} {MONTHS[x.month - 1]}, {x:%H:%M}"
+
+
+def parse_appt(text, day):
+    """«21.10 14:30», «14:30», «21.10 в 14.30» → datetime МСК. day — желаемый день из заявки (если дата не указана)."""
+    s = text.lower().replace(" в ", " ")
+    tm = re.search(r"(\d{1,2})[:.](\d{2})\s*$", s.strip())
+    if not tm:
+        return None
+    rest = s.strip()[:tm.start()].strip()
+    now = datetime.now(MSK)
+    try:
+        if rest:
+            dm = re.fullmatch(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?", rest)
+            if not dm:
+                return None
+            y = int(dm.group(3)) if dm.group(3) else now.year
+            y = y + 2000 if y < 100 else y
+            d = datetime(y, int(dm.group(2)), int(dm.group(1)), tzinfo=MSK)
+            if not dm.group(3) and d.date() < (now - timedelta(days=1)).date():
+                d = d.replace(year=y + 1)
+        else:
+            d = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=MSK)
+        return d.replace(hour=int(tm.group(1)), minute=int(tm.group(2)))
+    except ValueError:
+        return None
+
+
 def lead_text(l):
     services = json.loads(l["services"])
     head = "Новая заявка" if l["status"] == "new" else f"Заявка · {STATUS[l['status']]}"
@@ -176,6 +217,11 @@ def lead_text(l):
             f"<b>Связь:</b> {esc(CONTACT.get(l['contact'], l['contact']))}{handle_html(l)}"]
     if l["comment"]:
         out.append(f"<b>Комментарий:</b> {esc(l['comment'])}")
+    if l["contact"] == "telegram":
+        out.append("<b>Уведомления:</b> " + ("🔔 клиент подключил бота — подтверждение и напоминания уйдут сами" if l["client_chat"]
+                                              else "⏳ клиент ещё не открыл бота — пока пишите ему сами"))
+    if l["appt_at"]:
+        out.append(f"<b>Записан(а):</b> {fmt_appt(l['appt_at'])}")
     if l["status"] and l["status"] != "new":
         out += ["", f"<b>Статус: {STATUS[l['status']]}</b> · {esc(l['status_by'] or '')} {fmt_time(l['status_at'])}"]
     return "\n".join(out)
@@ -187,6 +233,146 @@ def keyboard(i, closed=False):
         return {"inline_keyboard": [[b("Изменить статус", "edit")]]}
     return {"inline_keyboard": [[b("Подтвердил запись", "confirmed"), b("Не дозвонился", "noanswer")],
                                 [b("Клиент пришёл", "came"), b("Отмена", "cancelled")]]}
+
+
+def refresh_admin_msg(l):
+    if l and l["message_id"] and cfg.get("CHAT_ID"):
+        tg("editMessageText", {"chat_id": cfg["CHAT_ID"], "message_id": l["message_id"], "text": lead_text(l), "parse_mode": "HTML",
+                               "reply_markup": keyboard(l["id"], closed=l["status"] != "new")})
+
+
+def map_msg(admin_msg, lead_id, kind):
+    with db_lock, db() as con:
+        con.execute("INSERT OR REPLACE INTO msgmap VALUES(?,?,?)", (admin_msg, lead_id, kind))
+
+
+def ask_time(l):
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Во сколько записан(а) {l['name']}? Ответьте на это сообщение, например: "
+                           f"«{datetime.strptime(l['day'], '%Y-%m-%d'):%d.%m} 14:30» или просто «14:30».",
+                           "reply_markup": {"force_reply": True, "input_field_placeholder": "21.10 14:30"}})
+    if r.get("ok"):
+        map_msg(r["result"]["message_id"], l["id"], "ask")
+
+
+def services_line(l):
+    return ", ".join(s["name"] for s in json.loads(l["services"]))
+
+
+def to_client(l, text):
+    if l and l["client_chat"]:
+        r = tg("sendMessage", {"chat_id": l["client_chat"], "text": text})
+        if not r.get("ok"):
+            log("Клиенту", l["name"], "не доставлено:", r.get("description"))
+        return r.get("ok")
+    return False
+
+
+def set_appt(l, when, admin_chat):
+    left = when - datetime.now(MSK)
+    with db_lock, db() as con:  # напоминание, время которого уже прошло, не шлём
+        con.execute("UPDATE leads SET appt_at=?, rem24=?, rem2=?, status=CASE WHEN status IN ('new','noanswer') THEN 'confirmed' ELSE status END, "
+                    "status_at=COALESCE(status_at, ?) WHERE id=?",
+                    (when.isoformat(), int(left < timedelta(hours=25)), int(left < timedelta(hours=2, minutes=30)),
+                     datetime.now(timezone.utc).isoformat(), l["id"]))
+    l = get_lead(l["id"])
+    refresh_admin_msg(l)
+    sent = to_client(l, f"✅ Вы записаны в салон «{cfg['SALON_NAME']}»\n{fmt_appt(l['appt_at'])}\n{services_line(l)}\n\n"
+                        f"Адрес: {cfg['SALON_ADDRESS']}\nЕсли планы изменятся — просто напишите сюда.")
+    tg("sendMessage", {"chat_id": admin_chat, "text": f"Готово: {l['name']} — {fmt_appt(l['appt_at'])}. " + (
+        "Клиенту ушло подтверждение, напомним за сутки и за 2 часа." if sent else
+        "Клиент не подключил бота — подтвердите и напомните ему сами.")})
+    log("Время записи", l["id"], "→", fmt_appt(l["appt_at"]))
+
+
+def client_start(chat, tok, first_name):
+    with db_lock, db() as con:
+        l = con.execute("SELECT * FROM leads WHERE tok=?", (tok,)).fetchone()
+        if l and not l["client_chat"]:
+            con.execute("UPDATE leads SET client_chat=? WHERE id=?", (str(chat), l["id"]))
+    if not l or (l["client_chat"] and l["client_chat"] != str(chat)):
+        return client_hello(chat)
+    l = get_lead(l["id"])
+    w = WIN.get(l["win"], "")
+    tg("sendMessage", {"chat_id": chat, "text": f"Здравствуйте, {l['name']}! Заявка в салон «{cfg['SALON_NAME']}» получена:\n"
+                       f"{services_line(l)}\nКогда удобно: {fmt_day(l['day'])}, {w}\n\n"
+                       "Администратор свяжется с вами и подтвердит точное время. Подтверждение и напоминание придут сюда."})
+    refresh_admin_msg(l)
+    log("Клиент подключил уведомления:", l["id"], l["name"])
+
+
+def client_hello(chat):
+    tg("sendMessage", {"chat_id": chat, "text": f"Здравствуйте! Это бот салона «{cfg['SALON_NAME']}», {cfg['SALON_ADDRESS']}. "
+                       "Сюда приходят подтверждения записи и напоминания." +
+                       (f"\nЗаписаться: {cfg['SITE_URL']}" if cfg.get("SITE_URL") else "")})
+
+
+def client_message(chat, text, m):
+    with db_lock, db() as con:
+        l = con.execute("SELECT * FROM leads WHERE client_chat=? ORDER BY created_at DESC LIMIT 1", (str(chat),)).fetchone()
+    if not l or not cfg.get("CHAT_ID"):
+        return client_hello(chat)
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"💬 {l['name']} ({l['phone']}) пишет:\n{text}\n\n"
+                           "Ответьте на это сообщение — ответ уйдёт клиенту."})
+    if r.get("ok"):
+        map_msg(r["result"]["message_id"], l["id"], "fwd")
+        tg("sendMessage", {"chat_id": chat, "text": "Передали администратору ✓ Ответ придёт сюда."})
+
+
+def admin_reply(chat, text, reply_to):
+    with db_lock, db() as con:
+        mm = con.execute("SELECT * FROM msgmap WHERE admin_msg=?", (reply_to,)).fetchone()
+        if not mm:  # ответ прямо на сообщение с заявкой — тоже считаем временем записи
+            row = con.execute("SELECT id FROM leads WHERE message_id=? ORDER BY created_at DESC LIMIT 1", (reply_to,)).fetchone()
+            mm = {"lead_id": row["id"], "kind": "ask"} if row else None
+    if not mm:
+        return False
+    l = get_lead(mm["lead_id"])
+    if mm["kind"] == "fwd":
+        ok = to_client(l, f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}")
+        tg("sendMessage", {"chat_id": chat, "text": "Отправлено клиенту ✓" if ok else "Не получилось отправить клиенту — позвоните ему."})
+        return True
+    when = parse_appt(text, l["day"])
+    if not when:
+        r = tg("sendMessage", {"chat_id": chat, "text": "Не понял время. Ответьте на это сообщение, например: 21.10 14:30",
+                               "reply_markup": {"force_reply": True, "input_field_placeholder": "21.10 14:30"}})
+        if r.get("ok"):
+            map_msg(r["result"]["message_id"], l["id"], "ask")
+        return True
+    set_appt(l, when, chat)
+    return True
+
+
+def reminder_loop():
+    while True:
+        time.sleep(60)
+        try:
+            now = datetime.now(MSK)
+            with db_lock, db() as con:
+                rows = con.execute("SELECT * FROM leads WHERE appt_at IS NOT NULL AND client_chat IS NOT NULL AND status='confirmed' "
+                                   "AND (rem24=0 OR rem2=0)").fetchall()
+            for l in rows:
+                when = datetime.fromisoformat(l["appt_at"])
+                if when < now:
+                    continue
+                for col, before, text in [("rem24", timedelta(hours=24), "Напоминаем: завтра ждём вас в салоне «{n}»\n{t}"),
+                                          ("rem2", timedelta(hours=2), "Через 2 часа ждём вас в салоне «{n}»\n{t}")]:
+                    if not l[col] and now >= when - before:
+                        t = fmt_appt(l["appt_at"]) + "\n" + services_line(l) + "\nАдрес: " + cfg["SALON_ADDRESS"]
+                        ok = to_client(l, text.format(n=cfg["SALON_NAME"], t=t) + "\nЕсли не получается прийти — напишите сюда.")
+                        with db_lock, db() as con:
+                            con.execute(f"UPDATE leads SET {col}=1 WHERE id=?", (l["id"],))
+                        log("Напоминание", col, l["id"], "отправлено" if ok else "не доставлено")
+                        break
+        except Exception as e:
+            log("Ошибка напоминаний:", e)
+
+
+def set_commands():
+    tg("setMyCommands", {"commands": [{"command": "start", "description": "О салоне"}]})
+    if cfg.get("CHAT_ID"):
+        tg("setMyCommands", {"scope": {"type": "chat", "chat_id": int(cfg["CHAT_ID"])},
+                             "commands": [{"command": "report", "description": "Сводка по заявкам"},
+                                          {"command": "update", "description": "Обновить сервер"}]})
 
 
 def get_lead(i):
@@ -228,6 +414,7 @@ def handle_update(u):
                                           "reply_markup": keyboard(i)})
             tg("answerCallbackQuery", {"callback_query_id": q["id"]})
             return
+        prev = get_lead(i)
         with db_lock, db() as con:
             con.execute("UPDATE leads SET status=?, status_at=?, status_by=? WHERE id=?",
                         (st, datetime.now(timezone.utc).isoformat(), q["from"].get("first_name", ""), i))
@@ -237,38 +424,55 @@ def handle_update(u):
                                    "parse_mode": "HTML", "reply_markup": keyboard(i, closed=True)})
         tg("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Статус: " + STATUS[st]})
         log("Статус заявки", i, "→", STATUS[st])
+        if l and st == "confirmed" and not l["appt_at"]:
+            ask_time(l)
+        if l and st == "cancelled" and prev and prev["status"] == "confirmed" and l["appt_at"]:
+            to_client(l, f"Запись в салон «{cfg['SALON_NAME']}» на {fmt_appt(l['appt_at'])} отменена. "
+                         "Если захотите выбрать другое время — напишите сюда.")
+        if l and st == "came" and prev and prev["status"] != "came" and cfg.get("REVIEW_URL"):
+            to_client(l, f"Спасибо, что были у нас! Будем благодарны за отзыв — это пара минут: {cfg['REVIEW_URL']}")
         return
     m = u.get("message") or {}
     text, chat = m.get("text", ""), (m.get("chat") or {}).get("id")
     if not text or chat is None:
         return
     is_admin = str(chat) == str(cfg["CHAT_ID"])
+    if is_admin and (m.get("reply_to_message") or {}).get("message_id") and not text.startswith("/"):
+        if admin_reply(chat, text, m["reply_to_message"]["message_id"]):
+            return
+    if text.startswith("/start ") and len(text.split()) == 2:  # клиент пришёл по кнопке со страницы (админ тоже может проверить на себе)
+        return client_start(chat, text.split(maxsplit=1)[1].strip(), (m.get("from") or {}).get("first_name", ""))
     if text.startswith("/admin"):
         if text.split(maxsplit=1)[-1].strip() == cfg["REPORT_KEY"]:
             cfg["CHAT_ID"] = str(chat)
             save_config()
             tg("sendMessage", {"chat_id": chat, "text": "Готово: заявки с сайта теперь будут приходить в этот чат.\n/report — сводка по заявкам."})
             log("Администратор подключён, chat_id", chat)
+            set_commands()
             threading.Thread(target=resend_pending, daemon=True).start()
         else:
             tg("sendMessage", {"chat_id": chat, "text": "Неверный пароль. Отправьте: /admin ПАРОЛЬ (REPORT_KEY из config.json)."})
     elif text.startswith("/start"):
-        tg("sendMessage", {"chat_id": chat, "text": "Бот заявок салона «Эйфория».\n" + (
-            "Новые заявки приходят сюда. /report — сводка." if is_admin else
-            "Чтобы получать заявки, отправьте: /admin ПАРОЛЬ (пароль REPORT_KEY из config.json сервера).")})
+        if is_admin:
+            tg("sendMessage", {"chat_id": chat, "text": "Вы администратор: сюда приходят заявки. /report — сводка, /update — обновить сервер.\n"
+                               "После «Подтвердил запись» бот спросит время — ответьте на его сообщение, и клиент получит подтверждение."})
+        else:
+            client_hello(chat)
     elif text.startswith("/update") and is_admin:
         threading.Thread(target=check_update, args=(True,), daemon=True).start()
     elif text.startswith("/report") and is_admin:
         tg("sendMessage", {"chat_id": chat, "text": summary(7) + "\n\n" + summary(30) + "\n\nПолный список: страница /admin на сервере."})
+    elif not is_admin and not text.startswith("/"):
+        client_message(chat, text[:1000], m)
 
 
 def poll_loop():
     global tg_offset
     tg("deleteWebhook", {})
-    tg("setMyCommands", {"commands": [{"command": "report", "description": "Сводка по заявкам"},
-                                      {"command": "update", "description": "Обновить сервер"},
-                                      {"command": "start", "description": "О боте"}]})
+    set_commands()
     me = tg("getMe", {})
+    if me.get("ok"):
+        BOT["username"] = me["result"]["username"]
     log("Бот:", "@" + me["result"]["username"] if me.get("ok") else "не подключён — " + str(me.get("description")))
     while True:
         r = tg("getUpdates", {"offset": tg_offset, "timeout": 25, "allowed_updates": ["message", "callback_query"]}, timeout=35)
@@ -379,12 +583,13 @@ def clean_lead(b):
 
 def save_lead(lead):
     i = datetime.now().strftime("%y%m%d") + secrets.token_hex(3)
-    row = dict(lead, id=i, created_at=datetime.now(timezone.utc).isoformat(), services=json.dumps(lead["services"], ensure_ascii=False))
+    row = dict(lead, id=i, tok=secrets.token_urlsafe(12), created_at=datetime.now(timezone.utc).isoformat(),
+               services=json.dumps(lead["services"], ensure_ascii=False))
     with db_lock, db() as con:
-        con.execute("INSERT INTO leads(id,created_at,name,phone,services,total,total_from,day,win,contact,handle,comment) "
-                    "VALUES(:id,:created_at,:name,:phone,:services,:total,:total_from,:day,:win,:contact,:handle,:comment)", row)
+        con.execute("INSERT INTO leads(id,tok,created_at,name,phone,services,total,total_from,day,win,contact,handle,comment) "
+                    "VALUES(:id,:tok,:created_at,:name,:phone,:services,:total,:total_from,:day,:win,:contact,:handle,:comment)", row)
     ok = send_lead(get_lead(i))
-    return i, ok
+    return i, ok, row["tok"]
 
 
 def send_lead(l):
@@ -426,11 +631,12 @@ def resend_loop():
 def csv_bytes(rows):
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Дата заявки", "Имя", "Телефон", "Услуги", "Сумма, ₽", "Желаемый день", "Время", "Связь", "Ник в мессенджере", "Комментарий", "Статус", "Кто поставил статус"])
+    w.writerow(["Дата заявки", "Имя", "Телефон", "Услуги", "Сумма, ₽", "Желаемый день", "Время", "Записан(а)", "Связь", "Ник в мессенджере", "Бот подключён", "Комментарий", "Статус", "Кто поставил статус"])
     for l in rows:
         w.writerow([fmt_time(l["created_at"]), l["name"], l["phone"], "; ".join(s["name"] for s in json.loads(l["services"])),
                     ("от " if l["total_from"] else "") + str(l["total"]), l["day"], WIN.get(l["win"], l["win"]),
-                    CONTACT.get(l["contact"], l["contact"]), l["handle"] or "", l["comment"], STATUS.get(l["status"], l["status"]), l["status_by"] or ""])
+                    fmt_appt(l["appt_at"]) if l["appt_at"] else "", CONTACT.get(l["contact"], l["contact"]), l["handle"] or "",
+                    "да" if l["client_chat"] else "", l["comment"], STATUS.get(l["status"], l["status"]), l["status_by"] or ""])
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
 
@@ -439,7 +645,7 @@ def admin_html(days):
     tr = "".join(
         f"<tr><td>{fmt_time(l['created_at'])}</td><td>{esc(l['name'])}</td><td><a href='tel:{esc(re.sub(r'[^0-9+]', '', l['phone']))}'>{esc(l['phone'])}</a></td>"
         f"<td>{'<br>'.join(esc(s['name']) for s in json.loads(l['services']))}</td><td class=r>{'от ' if l['total_from'] else ''}{rub(l['total'])}</td>"
-        f"<td>{esc(fmt_day(l['day']))}<br><small>{esc(WIN.get(l['win'], ''))}</small></td><td>{esc(CONTACT.get(l['contact'], ''))}<br><small>{esc(l['handle'] or '')}</small></td>"
+        f"<td>{esc(fmt_appt(l['appt_at'])) if l['appt_at'] else esc(fmt_day(l['day'])) + '<br><small>' + esc(WIN.get(l['win'], '')) + '</small>'}</td><td>{esc(CONTACT.get(l['contact'], ''))}{' 🔔' if l['client_chat'] else ''}<br><small>{esc(l['handle'] or '')}</small></td>"
         f"<td>{esc(l['comment'])}</td><td><span class='st {l['status']}'>{STATUS.get(l['status'], l['status'])}</span></td></tr>" for l in rows)
     key = urllib.parse.quote(cfg["REPORT_KEY"])
     chips = "".join(f"<a class='chip{' on' if days == d else ''}' href='?key={key}&days={d}'>{n}</a>" for d, n in [(7, "7 дней"), (30, "30 дней"), (0, "всё время")])
@@ -455,7 +661,7 @@ th{{color:#8e8a86;font-weight:500}} td:nth-child(1),td:nth-child(3){{white-space
 .st.confirmed{{border-color:#7fc79a;color:#7fc79a}} .st.noanswer,.st.cancelled{{color:#e08a80;border-color:#e08a80}}</style></head>
 <body><main><h1>Заявки «Эйфории»</h1><p>{esc(summary(days or 3650)).replace('За 3650 дней', 'За всё время')}</p>{chips}
 <a href="/report.csv?key={key}&days={days}">Скачать таблицей (CSV)</a><br><br>
-<div class="wrap"><table><tr><th>Дата</th><th>Имя</th><th>Телефон</th><th>Услуги</th><th class=r>Сумма, ₽</th><th>Когда удобно</th><th>Связь</th><th>Комментарий</th><th>Статус</th></tr>
+<div class="wrap"><table><tr><th>Дата</th><th>Имя</th><th>Телефон</th><th>Услуги</th><th class=r>Сумма, ₽</th><th>Когда</th><th>Связь</th><th>Комментарий</th><th>Статус</th></tr>
 {tr or '<tr><td colspan=9>Заявок пока нет</td></tr>'}</table></div><p style="margin-top:12px">Статусы меняются кнопками под заявкой в Telegram.</p></main></body></html>"""
 
 
@@ -485,7 +691,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/", "/index.html"):
             if not PAGE_PATH.exists():
                 return self.send(404, "Нет файла public/index.html")
-            page = PAGE_PATH.read_text(encoding="utf-8").replace("<script>", "<script>window.EUPHORIA_ENDPOINT='/api/lead';", 1)
+            page = PAGE_PATH.read_text(encoding="utf-8").replace("<script>", "<script>window.EUPHORIA_ENDPOINT='/api/lead';window.EUPHORIA_BOT=" + json.dumps(BOT["username"]) + ";", 1)
             return self.send(200, page, "text/html; charset=utf-8")
         if u.path == "/admin":
             return self.send(200, admin_html(days or 30), "text/html; charset=utf-8") if self.key_ok(qs) else self.send(403, "Нужен ?key=ПАРОЛЬ")
@@ -512,9 +718,9 @@ class Handler(BaseHTTPRequestHandler):
         lead = clean_lead(body if isinstance(body, dict) else {})
         if not lead:
             return self.send(400, json.dumps({"ok": False, "error": "Не хватает данных"}), "application/json")
-        i, ok = save_lead(lead)
+        i, ok, tok = save_lead(lead)
         # Заявка сохранена в любом случае; если Telegram недоступен, она видна на странице /admin.
-        self.send(200, json.dumps({"ok": True, "id": i, "telegram": ok}), "application/json")
+        self.send(200, json.dumps({"ok": True, "id": i, "telegram": ok, "bot": BOT["username"], "start": tok}), "application/json")
 
 
 def main():
@@ -528,6 +734,7 @@ def main():
         threading.Thread(target=update_loop, daemon=True).start()
     if cfg.get("BOT_TOKEN"):
         threading.Thread(target=resend_loop, daemon=True).start()
+        threading.Thread(target=reminder_loop, daemon=True).start()
     ThreadingHTTPServer.allow_reuse_address = os.name != "nt"  # на Windows иначе можно случайно запустить два сервера на одном порту
     for attempt in range(6):  # после перезапуска порт может освободиться не сразу
         try:
