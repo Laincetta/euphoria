@@ -414,21 +414,14 @@ def all_leads(days=0):
     return rows
 
 
-def plural(n, one, few, many):
-    n = abs(n) % 100
-    return one if n % 10 == 1 and n != 11 else few if 2 <= n % 10 <= 4 and not 12 <= n <= 14 else many
-
-
-def lead_line(l):
-    """Одна заявка — одна строка: статус · когда пришла · имя · услуги · сумма · время записи или желаемый день."""
-    sv = json.loads(l["services"])
-    first = sv[0]["name"] if sv else "—"
-    first = first if len(first) <= 30 else first[:29] + "…"
-    more = f" +{len(sv) - 1}" if len(sv) > 1 else ""
-    when = ("🕒 " + fmt_appt(l["appt_at"])) if l["appt_at"] else ("хочет: " + fmt_day(l["day"]))
+def lead_line(n, l):
+    """Одна заявка — одна строка, словами: дата, имя, телефон, все услуги, сумма, время, связь, статус."""
+    sv = "; ".join(s["name"] for s in json.loads(l["services"])) or "—"
+    when = ("запись " + fmt_appt(l["appt_at"])) if l["appt_at"] else ("хочет " + fmt_day(l["day"]) + ", " + WIN.get(l["win"], ""))
     total = ("от " if l["total_from"] else "") + rub(l["total"]) + " ₽"
-    return (f"{MARK.get(l['status'], '•')} {fmt_time(l['created_at'])} · <b>{esc(l['name'])}</b> {esc(l['phone'])} · {esc(first)}{more} · "
-            f"{total} · {esc(when)}")
+    how = CONTACT.get(l["contact"], l["contact"]) + (" (бот подключён)" if l["client_chat"] else "")
+    return (f"{n}. {fmt_time(l['created_at'])} — <b>{esc(l['name'])}</b>, {esc(l['phone'])} — {esc(sv)} — {total} — "
+            f"{esc(when)} — {esc(how)} — <b>{STATUS.get(l['status'], l['status'])}</b>")
 
 
 def report_text():
@@ -436,23 +429,26 @@ def report_text():
         ls = all_leads(days)
         c = lambda *s: sum(1 for l in ls if l["status"] in s)
         money = sum(int(l["total"] or 0) for l in ls if l["status"] == "came")
-        return (f"<b>{days} дн:</b> {len(ls)} {plural(len(ls), 'заявка', 'заявки', 'заявок')} · ✅ {c('confirmed', 'came')} · 💚 {c('came')}"
-                f"{f' на {rub(money)} ₽' if money else ''} · 📵 {c('noanswer')} · ❌ {c('cancelled')} · 🆕 {c('new')}")
+        return (f"<b>За {days} дней:</b> заявок {len(ls)}, подтверждено {c('confirmed', 'came')}, пришли {c('came')}"
+                f"{f' (на {rub(money)} ₽)' if money else ''}, не дозвонились {c('noanswer')}, отмен {c('cancelled')}, "
+                f"без статуса {c('new')}.")
     top = {}
     for l in all_leads(30):
         for s in json.loads(l["services"]):
             top[s["name"]] = top.get(s["name"], 0) + 1
-    best = ", ".join(f"{esc(n)} ({c})" for n, c in sorted(top.items(), key=lambda x: -x[1])[:3]) or "—"
+    best = ", ".join(f"{esc(n)} ({c})" for n, c in sorted(top.items(), key=lambda x: -x[1])[:5]) or "—"
     last = all_leads()[:20]
-    out = ["📊 <b>Сводка по заявкам</b>", counts(7), counts(30), f"Чаще выбирали за 30 дней: {best}", "",
-           f"<b>Последние {len(last)}:</b>" if last else "Заявок пока нет."]
-    out += [lead_line(l) for l in last]
-    out += ["", "🆕 новая · ✅ подтверждена · 💚 пришёл · 📵 не дозвонились · ❌ отмена"]
+    out = ["<b>Сводка по заявкам</b>", "", counts(7), counts(30), "", f"<b>Чаще выбирали за 30 дней:</b> {best}", "",
+           f"<b>Последние заявки ({len(last)}):</b>" if last else "Заявок пока нет."]
+    out += [lead_line(i, l) for i, l in enumerate(last, 1)]
     site = (cfg.get("SITE_URL") or "").rstrip("/")
-    out.append(f'<a href="{html.escape(site)}/admin?key={urllib.parse.quote(cfg["REPORT_KEY"])}">Все заявки таблицей</a>' if site
-               else "Все заявки таблицей — страница admin на сервере (ссылка в окне сервера).")
+    out += ["", f'<a href="{html.escape(site)}/admin?key={urllib.parse.quote(cfg["REPORT_KEY"])}">Все заявки таблицей</a>' if site
+            else "Все заявки таблицей — страница admin на сервере (ссылка в окне сервера)."]
     text = "\n".join(out)
-    return text if len(text) < 4000 else text[:3990] + "…"
+    while len(text) > 4000 and len(out) > 10:  # лимит сообщения Telegram — убираем самые старые строки
+        out.pop(-3)
+        text = "\n".join(out)
+    return text
 
 
 def summary(days):
