@@ -127,7 +127,7 @@ def init_db():
         have = [r[1] for r in con.execute("PRAGMA table_info(leads)")]
         for col, typ in [("handle", "TEXT"), ("tok", "TEXT"), ("client_chat", "TEXT"), ("appt_at", "TEXT"),
                          ("rem24", "INTEGER DEFAULT 0"), ("rem2", "INTEGER DEFAULT 0"),
-                         ("client_ok", "INTEGER DEFAULT 0")]:  # обновление старой базы
+                         ("client_ok", "INTEGER DEFAULT 0"), ("tg_username", "TEXT")]:  # обновление старой базы
             if col not in have:
                 con.execute(f"ALTER TABLE leads ADD COLUMN {col} {typ}")
         # какое сообщение в чате админа к какой заявке относится: вопрос о времени, пересланное сообщение клиента
@@ -253,12 +253,34 @@ def lead_text(l):
     return "\n".join(out)
 
 
+def contact_row(l):
+    """Кнопки «связаться»: от имени бота (если клиент подключил бота) и из своего Telegram/MAX."""
+    if not l:
+        return []
+    row = []
+    if l["client_chat"]:
+        row.append({"text": "Написать от бота", "callback_data": f"rp:d{l['client_chat']}"})
+    nick = (l["tg_username"] or "") or (l["handle"][1:] if l["contact"] == "telegram" and (l["handle"] or "").startswith("@") else "")
+    digits = re.sub(r"\D", "", l["phone"] or "")
+    if len(digits) == 11 and digits[0] == "8":
+        digits = "7" + digits[1:]
+    if l["contact"] == "max" and re.match(r"(https?://)?(web\.)?max\.ru/\S+$", l["handle"] or ""):
+        h = l["handle"]
+        row.append({"text": "Открыть в MAX", "url": h if h.startswith("http") else "https://" + h})
+    elif nick:
+        row.append({"text": "Написать в Telegram", "url": f"https://t.me/{nick}"})
+    elif len(digits) >= 10:  # по номеру: откроется, если клиент разрешил находить себя по телефону
+        row.append({"text": "Написать в Telegram", "url": f"https://t.me/+{digits}"})
+    return [row] if row else []
+
+
 def keyboard(i, closed=False):
     b = lambda t, s: {"text": t, "callback_data": f"st:{i}:{s}"}
+    contact = contact_row(get_lead(i))
     if closed:  # статус выбран — кнопки свёрнуты, остаётся одна, чтобы исправить ошибку
-        return {"inline_keyboard": [[b("Изменить статус", "edit")]]}
+        return {"inline_keyboard": [[b("Изменить статус", "edit")]] + contact}
     return {"inline_keyboard": [[b("Подтвердил запись", "confirmed"), b("Не дозвонился", "noanswer")],
-                                [b("Клиент пришёл", "came"), b("Отмена", "cancelled")]]}
+                                [b("Клиент пришёл", "came"), b("Отмена", "cancelled")]] + contact}
 
 
 def refresh_admin_msg(l):
@@ -372,11 +394,11 @@ def my_text(l):
             f"Салон «{cfg['SALON_NAME']}», {cfg['SALON_ADDRESS']}\nТелефон: {salon_phone()}")
 
 
-def client_start(chat, tok, first_name):
+def client_start(chat, tok, first_name, username=""):
     with db_lock, db() as con:
         l = con.execute("SELECT * FROM leads WHERE tok=?", (tok,)).fetchone()
         if l and not l["client_chat"]:
-            con.execute("UPDATE leads SET client_chat=? WHERE id=?", (str(chat), l["id"]))
+            con.execute("UPDATE leads SET client_chat=?, tg_username=? WHERE id=?", (str(chat), username or None, l["id"]))
     if not l or (l["client_chat"] and l["client_chat"] != str(chat)):
         return client_hello(chat)
     l = get_lead(l["id"])
@@ -960,7 +982,8 @@ def handle_update(u):
         if admin_reply(chat, text, m["reply_to_message"]["message_id"]):
             return
     if text.startswith("/start ") and len(text.split()) == 2:  # клиент пришёл по кнопке со страницы (админ тоже может проверить на себе)
-        return client_start(chat, text.split(maxsplit=1)[1].strip(), (m.get("from") or {}).get("first_name", ""))
+        return client_start(chat, text.split(maxsplit=1)[1].strip(), (m.get("from") or {}).get("first_name", ""),
+                            (m.get("from") or {}).get("username", ""))
     if text.split("@")[0] == "/my":
         l = active_lead(chat)
         return tg("sendMessage", {"chat_id": chat, "text": my_text(l), "reply_markup": appt_kb(l) if l else menu_kb()})

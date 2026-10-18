@@ -1,9 +1,9 @@
 {
-  "version": "c52bd97541c4",
-  "built": "19.10.2026 01:24",
-  "note": "Кнопка «Закрыть» в диалогах и записях — меню убирается из чата",
+  "version": "16b269eff40e",
+  "built": "19.10.2026 01:34",
+  "note": "Кнопки связи в заявке: «Написать от бота» и «Написать в Telegram» (по нику или номеру), «Открыть в MAX»",
   "files": {
-    "server.py": "1f67cbdd7d20ce699d9ed50a581ea9a3790a013ff39a523ec9e6b575fa6ed797",
+    "server.py": "dcf96dfeeb7b3a7fa3f8e409e4fdbb1d8709665f2070dcea07421e6b2e4e91ec",
     "public/index.html": "173c3921d60d996a0a40bdf55268cc9984cbafd7f4a07ab5e8531e50082a06d3"
   }
 }
