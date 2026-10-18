@@ -466,7 +466,7 @@ def upcoming_text(period="all"):
     today = now.date()
     with db_lock, db() as con:
         rows = con.execute("SELECT * FROM leads WHERE appt_at IS NOT NULL AND status IN ('confirmed','came')").fetchall()
-        pend = con.execute("SELECT * FROM leads WHERE appt_at IS NULL AND status IN ('new','noanswer') ORDER BY created_at").fetchall()
+        pend = con.execute("SELECT * FROM leads WHERE appt_at IS NULL AND status IN ('new','noanswer','confirmed') ORDER BY created_at").fetchall()
     rows = sorted([l for l in rows if datetime.fromisoformat(l["appt_at"]) >= now - timedelta(hours=1)], key=lambda l: l["appt_at"])
     date_of = lambda l: datetime.fromisoformat(l["appt_at"]).astimezone(MSK).date()
     span = {"today": (0, 0), "tomorrow": (1, 1), "week": (0, 6)}.get(period)
@@ -479,7 +479,8 @@ def upcoming_text(period="all"):
     else:
         title = {"week": "Записи на неделю", "all": "Все предстоящие записи"}[period]
     total = sum(int(l["total"] or 0) for l in rows)
-    out = [f"<b>{title}</b>", f"{len(rows)} {plural(len(rows), 'запись', 'записи', 'записей')} на {rub(total)} ₽" if rows else "Записей нет."]
+    out = [f"<b>{title}</b>", f"{len(rows)} {plural(len(rows), 'запись', 'записи', 'записей')} на {rub(total)} ₽" if rows else
+           "Записей с назначенным временем нет."]
     day = None
     for l in rows:
         if not one_day and date_of(l) != day:
@@ -488,10 +489,14 @@ def upcoming_text(period="all"):
         out += ["", appt_block(l)]
     pend = [l for l in pend if datetime.fromisoformat(l["created_at"]) >= datetime.now(timezone.utc) - timedelta(days=14)]
     if pend:
-        out += ["", "", f"<b>Ждут звонка и подтверждения ({len(pend)})</b>", "—" * 12]
+        out += ["", "", f"<b>Без времени записи ({len(pend)})</b>"]
         for l in pend:
-            st = "не дозвонились" if l["status"] == "noanswer" else "новая"
-            out += ["", appt_block(l, with_time=False) + f"\n   хочет: {esc(fmt_day(l['day']))}, {esc(WIN.get(l['win'], ''))} · {st}"]
+            st = {"noanswer": "не дозвонились", "confirmed": "подтверждена, время не указано"}.get(l["status"], "новая, ждёт звонка")
+            sv = json.loads(l["services"])
+            first = (sv[0]["name"] if sv else "—") + (f" +{len(sv) - 1}" if len(sv) > 1 else "")
+            out.append(f"• <b>{esc(l['name'])}</b>, {nice_phone(l['phone'])} — {esc(first)} — хочет {esc(fmt_day(l['day']))} — {st}")
+        out += ["", "<i>Чтобы запись попала в расписание: нажмите «Подтвердил запись» под заявкой и ответьте боту временем, "
+                "например «20.10 14:30». Можно ответить временем прямо на сообщение с заявкой.</i>"]
     text = "\n".join(out)
     return text if len(text) < 4000 else text[:3980] + "\n…"
 
