@@ -290,7 +290,8 @@ def set_appt(l, when, admin_chat):
                         f"Адрес: {cfg['SALON_ADDRESS']}\nЕсли планы изменятся — просто напишите сюда.")
     tg("sendMessage", {"chat_id": admin_chat, "text": f"Готово: {l['name']} — {fmt_appt(l['appt_at'])}. " + (
         "Клиенту ушло подтверждение, напомним за сутки и за 2 часа." if sent else
-        "Клиент не подключил бота — подтвердите и напомните ему сами.")})
+        {"call": "Клиент выбрал звонок", "max": "Клиент выбрал MAX"}.get(l["contact"], "Клиент не подключил бота") +
+        " — подтвердите ему сами. За сутки до визита бот напомнит вам связаться с ним.")})
     log("Время записи", l["id"], "→", fmt_appt(l["appt_at"]))
 
 
@@ -358,11 +359,21 @@ def reminder_loop():
         try:
             now = datetime.now(MSK)
             with db_lock, db() as con:
-                rows = con.execute("SELECT * FROM leads WHERE appt_at IS NOT NULL AND client_chat IS NOT NULL AND status='confirmed' "
+                rows = con.execute("SELECT * FROM leads WHERE appt_at IS NOT NULL AND status='confirmed' "
                                    "AND (rem24=0 OR rem2=0)").fetchall()
             for l in rows:
                 when = datetime.fromisoformat(l["appt_at"])
                 if when < now:
+                    continue
+                if not l["client_chat"]:  # бот не может написать клиенту — напоминаем админу, чтобы позвонил или написал
+                    if not l["rem24"] and now >= when - timedelta(hours=24) and cfg.get("CHAT_ID"):
+                        how = {"call": "позвоните", "max": "напишите в MAX"}.get(l["contact"], "позвоните или напишите")
+                        tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"📞 Напомните клиенту о записи — {how}:\n{l['name']}, {l['phone']}"
+                                           f"{(' · ' + l['handle']) if l['handle'] else ''}\n{fmt_appt(l['appt_at'])} · {services_line(l)}"})
+                        log("Напоминание админу", l["id"])
+                    with db_lock, db() as con:
+                        con.execute("UPDATE leads SET rem24=CASE WHEN ? THEN 1 ELSE rem24 END, rem2=1 WHERE id=?",
+                                    (now >= when - timedelta(hours=24), l["id"]))
                     continue
                 for col, before, text in [("rem24", timedelta(hours=24), "Напоминаем: завтра ждём вас в салоне «{n}»\n{t}"),
                                           ("rem2", timedelta(hours=2), "Через 2 часа ждём вас в салоне «{n}»\n{t}")]:

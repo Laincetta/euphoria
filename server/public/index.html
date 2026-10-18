@@ -1911,7 +1911,8 @@ const HANDLE_FIELD = {
   max: ['Ваш ник или ссылка на профиль в MAX', 'ник или ссылка', 'Можно не указывать — найдём вас в MAX по номеру телефона.'] };
 const CONTACT_NOTE = {
   telegram: 'После отправки нажмите «Включить уведомления» — откроется наш бот в Telegram. Туда придёт подтверждение и напоминание о записи.',
-  max: 'Администратор напишет вам в MAX: подтвердит время и напомнит о записи.' };
+  max: 'Администратор напишет вам в MAX: подтвердит время и напомнит о записи.',
+  call: 'Администратор позвонит, чтобы подтвердить время, и накануне напомнит о записи.' };
 function handle() { return st.bk && st.handles[st.bk.contact] ? st.handles[st.bk.contact].trim() : ''; }
 function requestText() {
   const b = st.bk, w = WINDOWS.find((x) => x.id === b.win) || {};
@@ -1953,8 +1954,8 @@ function renderBooking(enter) {
   } else if (b.step === 3) {
     body = '<label class="fld">Имя<input id="fName" autocomplete="given-name" placeholder="Как к вам обращаться" value="' + esc(st.name) + '"></label>' +
       '<label class="fld">Телефон<input id="fPhone" type="tel" autocomplete="tel" inputmode="tel" placeholder="+7 900 000-00-00" value="' + esc(st.phone) + '"></label>' +
-      '<div class="label caps">Куда прислать подтверждение и напоминание</div><div class="chips" style="padding:0">' + [['telegram', 'Telegram'], ['max', 'MAX']].map(([k, n]) => '<button class="chip" aria-pressed="' + (b.contact === k) + '" data-a="bkContact" data-v="' + k + '">' + n + '</button>').join('') + '</div>' +
-      (b.contact ? '<p class="hint">' + CONTACT_NOTE[b.contact] + '</p>' : '<p class="hint" style="color:var(--gold)">Выберите мессенджер — без него не сможем прислать подтверждение.</p>') +
+      '<div class="label caps">Куда прислать подтверждение и напоминание</div><div class="chips" style="padding:0">' + [['telegram', 'Telegram'], ['max', 'MAX'], ['call', 'По телефону']].map(([k, n]) => '<button class="chip" aria-pressed="' + (b.contact === k) + '" data-a="bkContact" data-v="' + k + '">' + n + '</button>').join('') + '</div>' +
+      (b.contact ? '<p class="hint">' + CONTACT_NOTE[b.contact] + '</p>' : '<p class="hint" style="color:var(--gold)">Выберите, как с вами связаться, — так мы пришлём подтверждение и напоминание.</p>') +
       (HANDLE_FIELD[b.contact] ? '<label class="fld">' + HANDLE_FIELD[b.contact][0] + '<input id="fHandle" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="' + HANDLE_FIELD[b.contact][1] + '" value="' + esc(st.handles[b.contact]) + '"></label><p class="hint" style="margin-top:-4px">' + HANDLE_FIELD[b.contact][2] + '</p>' : '') +
       '<label class="fld">Комментарий, если нужно<textarea id="fComment" placeholder="Например: хочу маникюр и педикюр одновременно">' + esc(st.comment) + '</textarea></label>' +
       '<label class="agree"><input type="checkbox" id="fAgree"' + (st.agree ? ' checked' : '') + '><span>Даю <a href="/consent" target="_blank" rel="noopener">согласие на обработку персональных данных</a> для записи и связи со мной</span></label>' +
@@ -1963,7 +1964,7 @@ function renderBooking(enter) {
     const w = WINDOWS.find((x) => x.id === b.win) || {};
     body = '<div class="done"><span class="ok">' + I.check.replace('width="16" height="16"', 'width="34" height="34"') + '</span><h3>Заявка отправлена</h3>' + (b.contact === 'telegram' && b.botUrl
         ? '<p><b style="color:var(--ink)">Остался один шаг:</b> откройте бота и нажмите «Начать». Туда придёт подтверждение времени и напоминание.</p><a class="btn-gold" href="' + esc(b.botUrl) + '" target="_blank" rel="noopener">Включить уведомления в Telegram</a>'
-        : '<p>Администратор свяжется с вами' + ({ telegram: ' в Telegram', max: ' в MAX' }[b.contact] || '') + ' и подтвердит точное время.</p>') +
+        : '<p>Администратор свяжется с вами' + ({ telegram: ' в Telegram', max: ' в MAX', call: ' по телефону' }[b.contact] || '') + ' и подтвердит точное время.</p>') +
       '<div class="note" style="width:100%;text-align:left">' + items.map((s) => esc(s.name)).join('<br>') + '<br><br><b>' + esc(dayLabel(b.day)) + ', ' + esc((w.name || '').toLowerCase()) + '</b> · ' + esc(S.addressShort) + '</div>' +
       '<button class="btn-line" data-a="route">Как добраться</button>' + (b.sent === 'telegram' ? '' : '<span class="hint">Демо-режим: заявка никуда не отправлена</span>') + '</div>';
   }
