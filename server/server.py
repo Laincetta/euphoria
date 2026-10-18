@@ -345,9 +345,20 @@ def cb(text, data):
     return {"text": text, "callback_data": data}
 
 
+def reviews_url():
+    """Отзывы о салоне в Яндекс Картах: REVIEW_URL, иначе карточка из MAP_URL + reviews/, иначе поиск салона."""
+    if cfg.get("REVIEW_URL"):
+        return cfg["REVIEW_URL"]
+    m = (cfg.get("MAP_URL") or "").split("?")[0]
+    if "/maps/org/" in m:
+        m = m.rstrip("/")
+        return (m[:-len("/reviews")] if m.endswith("/reviews") else m) + "/reviews/"
+    return route_url()
+
+
 def menu_kb():
     rows = [[cb("Моя запись", "c:my")], [cb("Задать вопрос администратору", "c:ask")],
-            [{"text": "Как добраться", "url": route_url()}]]
+            [{"text": "Как добраться", "url": route_url()}, {"text": "Отзывы", "url": reviews_url()}]]
     if cfg.get("SITE_URL"):
         rows.insert(1, [{"text": "Записаться на сайте", "url": cfg["SITE_URL"]}])
     return {"inline_keyboard": rows}
@@ -425,7 +436,7 @@ def client_hello(chat):
             "и написать администратору.")
     tg("sendMessage", {"chat_id": chat, "text": text, "reply_markup": menu_kb() if not l else
                        {"inline_keyboard": [[cb("Моя запись", "c:my")], [cb("Задать вопрос администратору", "c:ask")],
-                                            [{"text": "Как добраться", "url": route_url()}]]}})
+                                            [{"text": "Как добраться", "url": route_url()}, {"text": "Отзывы", "url": reviews_url()}]]}})
 
 
 def notify_admin(l, text, fwd=True):
