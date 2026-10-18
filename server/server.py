@@ -64,7 +64,8 @@ DEFAULT_CONFIG = {
     "OPERATOR_OGRN": "",  # ОГРНИП или ОГРН
     "OPERATOR_ADDRESS": "",
     "OPERATOR_EMAIL": "",
-    "DATA_KEEP_DAYS": 365,  # заявки старше этого срока удаляются автоматически
+    "DATA_KEEP_DAYS": 365,
+    "DIGEST_HOUR": 9,  # во сколько (МСК) бот присылает админу записи на день; 0 — не присылать  # заявки старше этого срока удаляются автоматически
     "TELEGRAM_API": "https://api.telegram.org",
     "UPDATE_REPO": "Laincetta/euphoria",  # пусто — обновления выключены
     "UPDATE_BRANCH": "main",
@@ -175,6 +176,8 @@ rub = lambda n: f"{int(n or 0):,}".replace(",", " ")
 
 
 def fmt_time(iso):
+    if not iso:
+        return ""
     return datetime.fromisoformat(iso).astimezone(MSK).strftime("%d.%m, %H:%M")
 
 
@@ -379,11 +382,12 @@ def reminder_loop():
                         con.execute("UPDATE leads SET rem24=CASE WHEN ? THEN 1 ELSE rem24 END, rem2=1 WHERE id=?",
                                     (now >= when - timedelta(hours=24), l["id"]))
                     continue
-                for col, before, text in [("rem24", timedelta(hours=24), "Напоминаем: завтра ждём вас в салоне «{n}»\n{t}"),
+                for col, before, text in [("rem24", timedelta(hours=24), "Напоминаем: {d} ждём вас в салоне «{n}»\n{t}"),
                                           ("rem2", timedelta(hours=2), "Через 2 часа ждём вас в салоне «{n}»\n{t}")]:
                     if not l[col] and now >= when - before:
                         t = fmt_appt(l["appt_at"]) + "\n" + services_line(l) + "\nАдрес: " + cfg["SALON_ADDRESS"]
-                        ok = to_client(l, text.format(n=cfg["SALON_NAME"], t=t) + f"\nЕсли не получается прийти — напишите сюда или позвоните: {salon_phone()}")
+                        d = {0: "сегодня", 1: "завтра"}.get((when.astimezone(MSK).date() - now.date()).days, "скоро")
+                        ok = to_client(l, text.format(n=cfg["SALON_NAME"], t=t, d=d) + f"\nЕсли не получается прийти — напишите сюда или позвоните: {salon_phone()}")
                         with db_lock, db() as con:
                             con.execute(f"UPDATE leads SET {col}=1 WHERE id=?", (l["id"],))
                         log("Напоминание", col, l["id"], "отправлено" if ok else "не доставлено")
@@ -396,7 +400,8 @@ def set_commands():
     tg("setMyCommands", {"commands": [{"command": "start", "description": "О салоне"}]})
     if cfg.get("CHAT_ID"):
         tg("setMyCommands", {"scope": {"type": "chat", "chat_id": int(cfg["CHAT_ID"])},
-                             "commands": [{"command": "report", "description": "Сводка по заявкам"},
+                             "commands": [{"command": "upcoming", "description": "Предстоящие записи"},
+                                          {"command": "report", "description": "Сводка по заявкам"},
                                           {"command": "update", "description": "Обновить сервер"}]})
 
 
@@ -412,6 +417,77 @@ def all_leads(days=0):
         since = datetime.now(timezone.utc) - timedelta(days=days)
         rows = [r for r in rows if datetime.fromisoformat(r["created_at"]) >= since]
     return rows
+
+
+def nice_phone(p):
+    d = re.sub(r"\D", "", p or "")
+    if len(d) == 11 and d[0] in "78":
+        return f"+7 {d[1:4]} {d[4:7]}-{d[7:9]}-{d[9:]}"
+    return p
+
+
+def day_title(d, today):
+    x = d.date()
+    rel = {0: "Сегодня", 1: "Завтра", 2: "Послезавтра"}.get((x - today).days)
+    base = f"{DAYS[x.weekday()]}, {x.day} {MONTHS[x.month - 1]}"
+    return f"{rel}, {base}" if rel else base[0].upper() + base[1:]
+
+
+def appt_block(l, with_time=True):
+    sv = "\n".join("   " + esc(s["name"]) for s in json.loads(l["services"]))
+    t = datetime.fromisoformat(l["appt_at"]).astimezone(MSK).strftime("%H:%M") if with_time and l["appt_at"] else ""
+    how = {"telegram": "Telegram" + (", бот подключён" if l["client_chat"] else ", бот не подключён"),
+           "max": "MAX" + (f" ({l['handle']})" if l["handle"] else ""), "call": "звонок"}.get(l["contact"], l["contact"])
+    total = ("от " if l["total_from"] else "") + rub(l["total"]) + " ₽"
+    head = f"<b>{t}</b>  {esc(l['name'])}" if t else f"<b>{esc(l['name'])}</b>"
+    lines = [head, f"   {nice_phone(l['phone'])}", sv, f"   {total} · связь: {esc(how)}"]
+    if l["comment"]:
+        lines.append(f"   «{esc(l['comment'])}»")
+    return "\n".join(lines)
+
+
+def upcoming_text(only_today=False):
+    now = datetime.now(MSK)
+    today = now.date()
+    with db_lock, db() as con:
+        rows = con.execute("SELECT * FROM leads WHERE appt_at IS NOT NULL AND status IN ('confirmed','came')").fetchall()
+        pend = con.execute("SELECT * FROM leads WHERE appt_at IS NULL AND status IN ('new','noanswer') ORDER BY created_at").fetchall()
+    rows = sorted([l for l in rows if datetime.fromisoformat(l["appt_at"]) >= now - timedelta(hours=1)],
+                  key=lambda l: l["appt_at"])
+    if only_today:
+        rows = [l for l in rows if datetime.fromisoformat(l["appt_at"]).astimezone(MSK).date() == today]
+    out = [f"<b>Записи на сегодня, {day_title(now, today).split(', ', 1)[1]}</b>" if only_today else "<b>Предстоящие записи</b>"]
+    day = None
+    for l in rows:
+        d = datetime.fromisoformat(l["appt_at"]).astimezone(MSK)
+        if d.date() != day and not only_today:
+            day = d.date()
+            out += ["", f"<b>{day_title(d, today)}</b>", "—" * 12]
+        out += ["", appt_block(l)]
+    if not rows:
+        out += ["", "Записей нет." if only_today else "Подтверждённых записей пока нет."]
+    pend = [l for l in pend if datetime.fromisoformat(l["created_at"]) >= datetime.now(timezone.utc) - timedelta(days=14)]
+    if pend:
+        out += ["", "", f"<b>Ждут звонка и подтверждения ({len(pend)})</b>", "—" * 12]
+        for l in pend:
+            st = "не дозвонились" if l["status"] == "noanswer" else "новая"
+            out += ["", appt_block(l, with_time=False) + f"\n   хочет: {esc(fmt_day(l['day']))}, {esc(WIN.get(l['win'], ''))} · {st}"]
+    text = "\n".join(out)
+    return text if len(text) < 4000 else text[:3980] + "\n…"
+
+
+def digest_loop():
+    sent_for = None
+    while True:
+        time.sleep(60)
+        try:
+            h, now = int(cfg.get("DIGEST_HOUR") or 0), datetime.now(MSK)
+            if h and cfg.get("CHAT_ID") and now.hour == h and sent_for != now.date():
+                sent_for = now.date()
+                tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": upcoming_text(only_today=True), "parse_mode": "HTML"})
+                log("Утренняя сводка записей отправлена")
+        except Exception as e:
+            log("Ошибка утренней сводки:", e)
 
 
 def lead_line(n, l):
@@ -522,6 +598,8 @@ def handle_update(u):
             client_hello(chat)
     elif text.startswith("/update") and is_admin:
         threading.Thread(target=check_update, args=(True,), daemon=True).start()
+    elif text.startswith("/upcoming") and is_admin:
+        tg("sendMessage", {"chat_id": chat, "text": upcoming_text(), "parse_mode": "HTML"})
     elif text.startswith("/report") and is_admin:
         tg("sendMessage", {"chat_id": chat, "text": report_text(), "parse_mode": "HTML", "disable_web_page_preview": True})
     elif not is_admin and not text.startswith("/"):
@@ -686,7 +764,10 @@ def resend_pending():
 def resend_loop():
     while True:
         time.sleep(60)
-        resend_pending()
+        try:
+            resend_pending()
+        except Exception as e:
+            log("Ошибка досылки заявок:", e)
 
 
 # ---------- веб ----------
@@ -862,6 +943,7 @@ def main():
     if cfg.get("BOT_TOKEN"):
         threading.Thread(target=resend_loop, daemon=True).start()
         threading.Thread(target=reminder_loop, daemon=True).start()
+        threading.Thread(target=digest_loop, daemon=True).start()
     ThreadingHTTPServer.allow_reuse_address = os.name != "nt"  # на Windows иначе можно случайно запустить два сервера на одном порту
     for attempt in range(6):  # после перезапуска порт может освободиться не сразу
         try:
