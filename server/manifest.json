@@ -1,0 +1,9 @@
+{
+  "version": "73281f318f25",
+  "built": "18.10.2026 22:28",
+  "note": "Способ связи: звонок, Telegram или MAX с ником; кнопки статуса сворачиваются; обновление сервера из GitHub",
+  "files": {
+    "server.py": "c622ba0cb54c5b01de67991f82db19e24a2f0251a6aa9b6755c9fdacc1c6ddc5",
+    "public/index.html": "1da422987fab298054b72f8560fd958e68387950fac6cab7d2697f824f474c8d"
+  }
+}

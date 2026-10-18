@@ -1,0 +1,9 @@
+dist/
+__pycache__/
+*.pyc
+# на сервере салона, в репозиторий не попадают:
+server/config.json
+server/leads.db*
+server/VERSION
+server/backup/
+server/*.new
