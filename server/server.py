@@ -393,9 +393,31 @@ def client_hello(chat):
 def notify_admin(l, text, fwd=True):
     if not cfg.get("CHAT_ID"):
         return
-    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": text + ("\n\nОтветьте на это сообщение — ответ уйдёт клиенту." if fwd else "")})
+    payload = {"chat_id": cfg["CHAT_ID"], "text": text}
+    if fwd:
+        payload["reply_markup"] = reply_btn(l["id"])
+    r = tg("sendMessage", payload)
     if fwd and r.get("ok"):
         map_msg(r["result"]["message_id"], l["id"], "fwd")
+
+
+def reply_btn(target):
+    return {"inline_keyboard": [[{"text": "Ответить", "callback_data": f"rp:{target}"}]]}
+
+
+def ask_reply(target):
+    """Админ нажал «Ответить» — бот открывает поле ответа; следующий текст уйдёт клиенту."""
+    if str(target).startswith("chat:"):
+        name = "этому человеку"
+    else:
+        l = get_lead(target)
+        if not l:
+            return
+        name = f"{l['name']} ({nice_phone(l['phone'])})"
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Напишите ответ — он уйдёт {name if name.startswith('этому') else 'клиенту ' + name}.",
+                           "reply_markup": {"force_reply": True, "input_field_placeholder": "Ответ клиенту"}})
+    if r.get("ok"):
+        map_msg(r["result"]["message_id"], target, "fwd")
 
 
 def who(l):
@@ -466,8 +488,8 @@ def client_message(chat, text, m):
         u = m.get("from") or {}
         name = " ".join(x for x in [u.get("first_name"), u.get("last_name")] if x) or "Без имени"
         nick = f" @{u['username']}" if u.get("username") else ""
-        r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Сообщение в бот (без заявки) от {name}{nick}:\n{text}\n\n"
-                                                                   "Ответьте на это сообщение — ответ уйдёт этому человеку."})
+        r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Сообщение в бот (без заявки) от {name}{nick}:\n{text}",
+                               "reply_markup": reply_btn(f"chat:{chat}")})
         if r.get("ok"):
             map_msg(r["result"]["message_id"], f"chat:{chat}", "fwd")
         tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда.", "reply_markup": menu_kb()})
@@ -712,6 +734,11 @@ def summary(days):
 
 def handle_update(u):
     q = u.get("callback_query")
+    if q and str(q.get("data", "")).startswith("rp:"):  # админ: «Ответить» под сообщением клиента
+        if str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
+            ask_reply(q["data"][3:])
+        tg("answerCallbackQuery", {"callback_query_id": q["id"]})
+        return
     if q and str(q.get("data", "")).startswith("c:"):
         return client_callback(q)
     if q and str(q.get("data", "")).startswith("up:"):  # переключение периода в списке записей
@@ -789,7 +816,7 @@ def handle_update(u):
         if not is_admin or client_leads(chat):  # админ, проверяющий запись на себе, тоже пишет «как клиент»
             client_message(chat, text[:1000], m)
         else:
-            tg("sendMessage", {"chat_id": chat, "text": "Чтобы ответить клиенту, нажмите «Ответить» на его сообщении или на заявке. "
+            tg("sendMessage", {"chat_id": chat, "text": "Чтобы ответить клиенту, нажмите кнопку «Ответить» под его сообщением. "
                                                        "Записи — /upcoming, сводка — /report."})
 
 
