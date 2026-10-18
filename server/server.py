@@ -270,7 +270,7 @@ def contact_row(l):
     elif nick:
         row.append({"text": "Написать в Telegram", "url": f"https://t.me/{nick}"})
     elif len(digits) >= 10:  # по номеру: откроется, если клиент разрешил находить себя по телефону
-        row.append({"text": "Написать в Telegram", "url": f"https://t.me/+{digits}"})
+        row.append({"text": "Найти в Telegram по номеру", "url": f"https://t.me/+{digits}"})
     return [row] if row else []
 
 
@@ -395,7 +395,7 @@ def my_text(l):
             f"Салон «{cfg['SALON_NAME']}», {cfg['SALON_ADDRESS']}\nТелефон: {salon_phone()}")
 
 
-def client_start(chat, tok, first_name, username=""):
+def client_start(chat, tok, first_name, username="", auto=False):
     with db_lock, db() as con:
         l = con.execute("SELECT * FROM leads WHERE tok=?", (tok,)).fetchone()
         if l and not l["client_chat"]:
@@ -408,7 +408,8 @@ def client_start(chat, tok, first_name, username=""):
                        "text": f"Здравствуйте, {l['name']}! Заявка в салон «{cfg['SALON_NAME']}» получена.\n\n"
                                f"{services_line(l)}\nКогда удобно: {fmt_day(l['day'])}, {w}\n\n"
                                "Администратор позвонит или напишет и подтвердит точное время. "
-                               "Подтверждение и напоминания придут сюда."})
+                               "Подтверждение и напоминания придут сюда." +
+                               ("\n\nЕсли вы не оставляли эту заявку — нажмите «Отменить заявку»." if auto else "")})
     refresh_admin_msg(l)
     log("Клиент подключил уведомления:", l["id"], l["name"])
 
@@ -1175,8 +1176,31 @@ def save_lead(lead):
     with db_lock, db() as con:
         con.execute("INSERT INTO leads(id,tok,created_at,name,phone,services,total,total_from,day,win,contact,handle,comment) "
                     "VALUES(:id,:tok,:created_at,:name,:phone,:services,:total,:total_from,:day,:win,:contact,:handle,:comment)", row)
+    linked = autolink(i, lead["phone"])
     ok = send_lead(get_lead(i))
-    return i, ok, row["tok"]
+    if linked:
+        client_start(linked, row["tok"], "", auto=True)
+    return i, ok, row["tok"], bool(linked)
+
+
+def phone_key(p):
+    d = re.sub(r"\D", "", p or "")
+    return "7" + d[1:] if len(d) == 11 and d[0] == "8" else d
+
+
+def autolink(i, phone):
+    """Клиент уже подключал бота раньше (тот же телефон) — привязываем новую заявку к его чату сразу."""
+    key = phone_key(phone)
+    if len(key) < 10:
+        return None
+    with db_lock, db() as con:
+        for r in con.execute("SELECT phone, client_chat, tg_username FROM leads WHERE client_chat IS NOT NULL AND id<>? "
+                             "ORDER BY created_at DESC", (i,)).fetchall():
+            if phone_key(r["phone"]) == key:
+                con.execute("UPDATE leads SET client_chat=?, tg_username=? WHERE id=?", (r["client_chat"], r["tg_username"], i))
+                log("Заявка", i, "привязана к боту клиента по номеру телефона")
+                return r["client_chat"]
+    return None
 
 
 def send_lead(l):
@@ -1370,9 +1394,9 @@ class Handler(BaseHTTPRequestHandler):
         lead = clean_lead(body if isinstance(body, dict) else {})
         if not lead:
             return self.send(400, json.dumps({"ok": False, "error": "Не хватает данных"}), "application/json")
-        i, ok, tok = save_lead(lead)
+        i, ok, tok, linked = save_lead(lead)
         # Заявка сохранена в любом случае; если Telegram недоступен, она видна на странице /admin.
-        self.send(200, json.dumps({"ok": True, "id": i, "telegram": ok, "bot": BOT["username"], "start": tok}), "application/json")
+        self.send(200, json.dumps({"ok": True, "id": i, "telegram": ok, "bot": BOT["username"], "start": tok, "linked": linked}), "application/json")
 
 
 def main():

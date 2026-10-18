@@ -1933,6 +1933,7 @@ async function sendRequest() {
     if (!r.ok) throw new Error('сервер ответил ' + r.status);
     const j = await r.json().catch(() => ({}));
     b.botUrl = j.bot && j.start ? 'https://t.me/' + j.bot + '?start=' + encodeURIComponent(j.start) : '';
+    b.linked = !!j.linked;
     b.sent = 'telegram';
   } else b.sent = 'demo';
 }
@@ -1964,7 +1965,9 @@ function renderBooking(enter) {
       '<p class="hint">Без предоплаты. <a href="/privacy" target="_blank" rel="noopener">Политика обработки данных</a></p>';
   } else {
     const w = WINDOWS.find((x) => x.id === b.win) || {};
-    body = '<div class="done"><span class="ok">' + I.check.replace('width="16" height="16"', 'width="34" height="34"') + '</span><h3>Заявка отправлена</h3>' + (b.contact === 'telegram' && b.botUrl
+    body = '<div class="done"><span class="ok">' + I.check.replace('width="16" height="16"', 'width="34" height="34"') + '</span><h3>Заявка отправлена</h3>' + (b.contact === 'telegram' && b.linked
+        ? '<p>Уведомления уже подключены: подтверждение времени и напоминание придут в наш бот в Telegram.</p>' + (b.botUrl ? '<a class="btn-line" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:inherit" href="' + esc(b.botUrl) + '" target="_blank" rel="noopener">Открыть бота</a>' : '')
+        : b.contact === 'telegram' && b.botUrl
         ? '<p><b style="color:var(--ink)">Остался один шаг:</b> откройте бота и нажмите «Начать». Туда придёт подтверждение времени и напоминание.</p><a class="btn-gold" href="' + esc(b.botUrl) + '" target="_blank" rel="noopener">Включить уведомления в Telegram</a>'
         : '<p>Администратор свяжется с вами' + ({ telegram: ' в Telegram', max: ' в MAX', call: ' по телефону' }[b.contact] || '') + ' и подтвердит точное время.</p>') +
       '<div class="note" style="width:100%;text-align:left">' + items.map((s) => esc(s.name)).join('<br>') + '<br><br><b>' + esc(dayLabel(b.day)) + ', ' + esc((w.name || '').toLowerCase()) + '</b> · ' + esc(S.addressShort) + '</div>' +
