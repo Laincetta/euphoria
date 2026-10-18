@@ -321,6 +321,7 @@ const DATA = {
   "close": 21,
   "phone": "+7 (965) 340-82-87",
   "telegram": "",
+  "mapUrl": "",
   "site": "",
   "siteLabel": "",
   "metro": {
@@ -1840,14 +1841,14 @@ function renderMain(keepHero) {
     h += '<section class="sec"><div class="facts">' + fact('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 'Без выходных, ' + S.open + ':00–' + S.close + ':00') + fact('<path d="M7 11V5a2 2 0 0 1 4 0v6M11 9a2 2 0 0 1 4 0v2M15 10a2 2 0 0 1 4 0v4a6 6 0 0 1-12 0v-3"/>', 'Маникюр и педикюр в 4 руки') +
       fact('<path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>', esc(S.stop.dist) + ' от остановки') + fact('<path d="M5 12l5 5 9-10"/>', 'Все услуги в одном месте') + '</div></section>';
     const days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'], di = (now().getDay() + 6) % 7;
-    h += '<section class="sec" style="padding-bottom:4px"><div class="info-row">' + I.pin + '<div class="col"><span>' + esc(S.addressShort) + ' <span style="color:var(--faint)">· ' + esc(S.floor) + '</span></span><div class="links"><button data-a="route">Маршрут</button><span class="sep"></span><button data-a="copy">Скопировать адрес</button></div></div></div>' +
+    h += '<section class="sec" style="padding-bottom:4px"><div class="info-row">' + I.pin + '<div class="col"><span>' + esc(S.addressShort) + ' <span style="color:var(--faint)">· ' + esc(S.floor) + '</span></span><div class="links"><button data-a="route">На карте</button><span class="sep"></span><button data-a="copy">Скопировать адрес</button></div></div></div>' +
       '<div class="info-row" style="align-items:center">' + PHONE_I + '<span class="col">' + (st.phoneShown ? esc(S.phone) : esc(S.phone.slice(0, 7)) + ' ··· ·· ··') + '</span>' + (st.phoneShown ? '' : '<button class="link" data-a="showPhone">Показать</button>') + '</div>' +
       '<div class="msgr"><button data-a="tg">Написать в Telegram</button></div>' +
       '<button class="hours-btn" data-a="hours" aria-expanded="' + st.hoursOpen + '">' + I.clock + '<span style="flex:1">Ежедневно ' + S.open + ':00–' + S.close + ':00</span><span style="display:flex;color:var(--faint);transform:rotate(' + (st.hoursOpen ? 180 : 0) + 'deg)">' + I.chev + '</span></button>' +
       (st.hoursOpen ? '<div class="hours">' + days.map((d, i) => '<div class="' + (i === di ? 'today' : '') + '"><span>' + d + '</span><span>' + S.open + ':00–' + S.close + ':00</span></div>').join('') + '</div>' : '') + '</section>';
     h += '<section class="sec" style="display:flex;flex-direction:column;gap:16px"><div class="sec-h" style="margin:0"><h2>Как добраться</h2></div>' +
       '<div class="route"><span class="sq">М</span><span>' + esc(S.metro.name) + '</span><span>' + esc(S.metro.dist) + '</span></div><div class="route"><span class="sq">А</span><span>' + esc(S.stop.name) + '</span><span>' + esc(S.stop.dist) + '</span></div>' +
-      '<button class="btn-line" data-a="route">Построить маршрут</button></section></div>';
+      '<button class="btn-line" data-a="route">Открыть в Яндекс Картах</button></section></div>';
   }
   if (st.tab === 'services') {
     const list = CATS.filter(([k]) => st.cat === 'all' || st.cat === k);
@@ -1991,7 +1992,7 @@ async function bkNext() {
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-a]'); if (!el) return;
   const a = el.dataset.a, v = el.dataset.v, b = st.bk;
-  const routeUrl = 'https://yandex.ru/maps/?rtext=~' + encodeURIComponent(S.address) + '&rtt=auto';
+  const routeUrl = S.mapUrl || 'https://yandex.ru/maps/?text=' + encodeURIComponent('салон красоты ' + S.name + ', ' + S.address); // карточка салона, оттуда «Маршрут»
   switch (a) {
     case 'tab': st.tab = v; renderMain(true); if (v !== 'overview') document.querySelector('.tabs').scrollIntoView({ block: 'start' }); break;
     case 'cat': st.cat = v; renderMain(true); break;

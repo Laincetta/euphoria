@@ -56,7 +56,8 @@ DEFAULT_CONFIG = {
     "SALON_NAME": "Эйфория",
     "SALON_ADDRESS": "Реутов, Парковая улица, 8",
     "SALON_PHONE": "+7 (965) 340-82-87",
-    "SITE_URL": "",  # адрес страницы записи, когда сервер будет в интернете
+    "SITE_URL": "",
+    "MAP_URL": "",  # ссылка на салон в Яндекс Картах (Поделиться → Скопировать); пусто — поиск по адресу  # адрес страницы записи, когда сервер будет в интернете
     "REVIEW_URL": "",  # ссылка на отзывы в Яндекс Картах — бот попросит отзыв после визита
     # оператор персональных данных — для страниц /consent и /privacy (данные владелицы или её ИП/ООО)
     "OPERATOR_NAME": "",  # например: ИП Иванова Анна Андреевна
@@ -131,6 +132,9 @@ def init_db():
                 con.execute(f"ALTER TABLE leads ADD COLUMN {col} {typ}")
         # какое сообщение в чате админа к какой заявке относится: вопрос о времени, пересланное сообщение клиента
         con.execute("CREATE TABLE IF NOT EXISTS msgmap(admin_msg INTEGER PRIMARY KEY, lead_id TEXT, kind TEXT)")
+        # вопросы клиентов админу: кто, что спросил, ответили ли
+        con.execute("""CREATE TABLE IF NOT EXISTS questions(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, chat TEXT, lead_id TEXT,
+            name TEXT, phone TEXT, text TEXT, answered_at TEXT, answer TEXT)""")
 
 
 def norm_handle(contact, s):
@@ -301,7 +305,9 @@ def set_appt(l, when, admin_chat):
 
 
 def route_url():
-    return "https://yandex.ru/maps/?rtext=~" + urllib.parse.quote(cfg["SALON_ADDRESS"]) + "&rtt=auto"
+    """Карточка салона на Яндекс Картах (а не маршрут от текущего места): там уже есть кнопка «Маршрут»."""
+    return cfg.get("MAP_URL") or ("https://yandex.ru/maps/?text=" +
+                                  urllib.parse.quote(f"салон красоты {cfg['SALON_NAME']}, {cfg['SALON_ADDRESS']}"))
 
 
 def cb(text, data):
@@ -391,33 +397,105 @@ def client_hello(chat):
 
 
 def notify_admin(l, text, fwd=True):
+    """Сообщение админу о действии клиента. fwd=True — это вопрос: попадает в «Вопросы от клиентов», под ним «Ответить»."""
     if not cfg.get("CHAT_ID"):
         return
-    payload = {"chat_id": cfg["CHAT_ID"], "text": text}
     if fwd:
-        payload["reply_markup"] = reply_btn(l["id"])
-    r = tg("sendMessage", payload)
-    if fwd and r.get("ok"):
-        map_msg(r["result"]["message_id"], l["id"], "fwd")
+        return add_question(l["client_chat"], l, l["name"], l["phone"], text)
+    tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": text})
 
 
-def reply_btn(target):
-    return {"inline_keyboard": [[{"text": "Ответить", "callback_data": f"rp:{target}"}]]}
+def add_question(chat, l, name, phone, text, header=None):
+    with db_lock, db() as con:
+        cur = con.execute("INSERT INTO questions(at,chat,lead_id,name,phone,text) VALUES(?,?,?,?,?,?)",
+                          (datetime.now(timezone.utc).isoformat(), str(chat or ""), l["id"] if l else None, name, phone, text))
+        qid = cur.lastrowid
+    head = header or (f"Вопрос от {name}" + (f", {nice_phone(phone)}" if phone else ""))
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"{head}\n\n{text}", "reply_markup": reply_btn(f"q{qid}")})
+    if r.get("ok"):
+        map_msg(r["result"]["message_id"], f"q{qid}", "fwd")
+    log(f"Вопрос #{qid} от {name}:", "передан админу" if r.get("ok") else "НЕ передан — " + str(r.get("description")))
+    return r.get("ok")
+
+
+def get_question(target):
+    if not str(target).startswith("q") or not str(target)[1:].isdigit():
+        return None
+    with db_lock, db() as con:
+        return con.execute("SELECT * FROM questions WHERE id=?", (int(str(target)[1:]),)).fetchone()
+
+
+def reply_btn(target, label="Ответить"):
+    return {"inline_keyboard": [[{"text": label, "callback_data": f"rp:{target}"}]]}
 
 
 def ask_reply(target):
     """Админ нажал «Ответить» — бот открывает поле ответа; следующий текст уйдёт клиенту."""
-    if str(target).startswith("chat:"):
-        name = "этому человеку"
+    q = get_question(target)
+    if q:
+        name = f"{q['name']}" + (f" ({nice_phone(q['phone'])})" if q["phone"] else "")
+        quote = q["text"] if len(q["text"]) < 300 else q["text"][:300] + "…"
+        text = f"Ответ для {name} на сообщение:\n«{quote}»\n\nНапишите ответ и отправьте."
+    elif str(target).startswith("chat:"):
+        text = "Напишите ответ и отправьте."
     else:
         l = get_lead(target)
         if not l:
             return
-        name = f"{l['name']} ({nice_phone(l['phone'])})"
-    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Напишите ответ — он уйдёт {name if name.startswith('этому') else 'клиенту ' + name}.",
+        text = f"Ответ для {l['name']} ({nice_phone(l['phone'])}). Напишите и отправьте."
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": text,
                            "reply_markup": {"force_reply": True, "input_field_placeholder": "Ответ клиенту"}})
     if r.get("ok"):
         map_msg(r["result"]["message_id"], target, "fwd")
+
+
+def send_answer(target, text):
+    """Ответ админа клиенту. Возвращает (ok, кому)."""
+    q = get_question(target)
+    if q:
+        chat, name = q["chat"], q["name"]
+    elif str(target).startswith("chat:"):
+        chat, name = str(target)[5:], "клиенту"
+    else:
+        l = get_lead(target)
+        chat, name = (l["client_chat"] if l else None), (l["name"] if l else "клиенту")
+    if not chat:
+        log("Ответ админа: у клиента нет чата с ботом —", name)
+        return False, name
+    r = tg("sendMessage", {"chat_id": chat, "text": f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}",
+                           "reply_markup": {"inline_keyboard": [[cb("Ответить администратору", "c:ask"), cb("Меню", "c:menu")]]}})
+    if r.get("ok"):
+        with db_lock, db() as con:
+            if q:
+                con.execute("UPDATE questions SET answered_at=?, answer=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), text, q["id"]))
+            else:  # ответ без конкретного вопроса закрывает все открытые вопросы этого клиента
+                con.execute("UPDATE questions SET answered_at=?, answer=? WHERE chat=? AND answered_at IS NULL",
+                            (datetime.now(timezone.utc).isoformat(), text, str(chat)))
+    log("Ответ админа →", name, "доставлен" if r.get("ok") else "НЕ доставлен — " + str(r.get("description")))
+    return r.get("ok"), name
+
+
+def questions_text():
+    with db_lock, db() as con:
+        open_q = con.execute("SELECT * FROM questions WHERE answered_at IS NULL ORDER BY at").fetchall()
+        done = con.execute("SELECT * FROM questions WHERE answered_at IS NOT NULL ORDER BY answered_at DESC LIMIT 5").fetchall()
+    out = ["<b>Вопросы от клиентов</b>", f"Без ответа: {len(open_q)}" if open_q else "Все вопросы отвечены."]
+    for i, q in enumerate(open_q[:10], 1):
+        out += ["", f"<b>{i}. {esc(q['name'])}</b>" + (f", {nice_phone(q['phone'])}" if q["phone"] else "") + f" · {fmt_time(q['at'])}",
+                esc(q["text"] if len(q["text"]) < 400 else q["text"][:400] + "…")]
+    if len(open_q) > 10:
+        out += ["", f"…и ещё {len(open_q) - 10}"]
+    if done:
+        out += ["", "<b>Недавно отвечены</b>"]
+        for q in done:
+            out.append(f"{esc(q['name'])}: «{esc(q['text'][:60])}» → «{esc((q['answer'] or '')[:60])}»")
+    kb = [[{"text": f"Ответить: {i}. {q['name'][:20]}", "callback_data": f"rp:q{q['id']}"}] for i, q in enumerate(open_q[:10], 1)]
+    kb += [[{"text": f"Отметить все отвеченными ({len(open_q)})", "callback_data": "qa:all"}]] if open_q else []
+    return "\n".join(out)[:4000], {"inline_keyboard": kb + [[{"text": "Обновить", "callback_data": "qa:refresh"}]]}
+
+
+ADMIN_KB = {"keyboard": [[{"text": "Записи"}, {"text": "Вопросы от клиентов"}], [{"text": "Сводка"}]],
+            "resize_keyboard": True, "is_persistent": True}
 
 
 def who(l):
@@ -454,7 +532,8 @@ def client_callback(q):
         return tg("editMessageReplyMarkup", {"chat_id": chat, "message_id": mid, "reply_markup": appt_kb(l)})
     if act == "move":
         when = fmt_appt(l["appt_at"]) if l["appt_at"] else f"{fmt_day(l['day'])}, {WIN.get(l['win'], '')}"
-        notify_admin(l, f"{who(l)} просит перенести запись ({when}). Клиент сейчас напишет удобное время — или позвоните ему.")
+        add_question(chat, l, l["name"], l["phone"], f"Просит перенести запись ({when}). Клиент сейчас напишет удобное время — "
+                     "или позвоните ему.", header=f"{who(l)} — перенос записи")
         ans()
         return tg("sendMessage", {"chat_id": chat, "text": "Напишите, когда вам удобно — например «в четверг после 18:00». "
                                                            "Администратор подберёт время и ответит здесь."})
@@ -484,18 +563,15 @@ def client_message(chat, text, m):
     l = l[0] if l else None
     if not cfg.get("CHAT_ID"):
         return client_hello(chat)
-    if not l:  # человек нашёл бота сам, без заявки — всё равно передаём админу
+    if l:
+        ok = add_question(chat, l, l["name"], l["phone"], text)
+    else:  # человек нашёл бота сам, без заявки — всё равно передаём админу
         u = m.get("from") or {}
         name = " ".join(x for x in [u.get("first_name"), u.get("last_name")] if x) or "Без имени"
         nick = f" @{u['username']}" if u.get("username") else ""
-        r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"Сообщение в бот (без заявки) от {name}{nick}:\n{text}",
-                               "reply_markup": reply_btn(f"chat:{chat}")})
-        if r.get("ok"):
-            map_msg(r["result"]["message_id"], f"chat:{chat}", "fwd")
-        tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда.", "reply_markup": menu_kb()})
-        return
-    notify_admin(l, f"{who(l)} пишет:\n{text}")
-    tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда."})
+        ok = add_question(chat, None, name + nick, "", text, header=f"Вопрос от {name}{nick} (без заявки)")
+    tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда." if ok else
+                       f"Не получилось передать сообщение. Позвоните, пожалуйста: {salon_phone()}"})
 
 
 def admin_reply(chat, text, reply_to):
@@ -506,15 +582,12 @@ def admin_reply(chat, text, reply_to):
             mm = {"lead_id": row["id"], "kind": "ask"} if row else None
     if not mm:
         return False
-    if str(mm["lead_id"]).startswith("chat:"):
-        r = tg("sendMessage", {"chat_id": mm["lead_id"][5:], "text": f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}"})
-        tg("sendMessage", {"chat_id": chat, "text": "Отправлено ✓" if r.get("ok") else "Не получилось отправить."})
+    if mm["kind"] == "fwd":
+        ok, name = send_answer(mm["lead_id"], text)
+        tg("sendMessage", {"chat_id": chat, "text": f"Отправлено: {name}." if ok else
+                           f"Не получилось отправить ({name}): клиент не подключал бота. Позвоните ему."})
         return True
     l = get_lead(mm["lead_id"])
-    if mm["kind"] == "fwd":
-        ok = to_client(l, f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}")
-        tg("sendMessage", {"chat_id": chat, "text": "Отправлено клиенту ✓" if ok else "Не получилось отправить клиенту — позвоните ему."})
-        return True
     when = parse_appt(text, l["day"])
     if not when:
         r = tg("sendMessage", {"chat_id": chat, "text": "Не понял время. Ответьте на это сообщение, например: 21.10 14:30",
@@ -568,6 +641,7 @@ def set_commands():
     if cfg.get("CHAT_ID"):
         tg("setMyCommands", {"scope": {"type": "chat", "chat_id": int(cfg["CHAT_ID"])},
                              "commands": [{"command": "upcoming", "description": "Записи"},
+                                          {"command": "questions", "description": "Вопросы от клиентов"},
                                           {"command": "report", "description": "Сводка по заявкам"},
                                           {"command": "update", "description": "Обновить сервер"}]})
 
@@ -739,6 +813,17 @@ def handle_update(u):
             ask_reply(q["data"][3:])
         tg("answerCallbackQuery", {"callback_query_id": q["id"]})
         return
+    if q and str(q.get("data", "")).startswith("qa:"):  # админ: список вопросов
+        if str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
+            if q["data"] == "qa:all":
+                with db_lock, db() as con:
+                    con.execute("UPDATE questions SET answered_at=?, answer=COALESCE(answer,'(отмечено вручную)') WHERE answered_at IS NULL",
+                                (datetime.now(timezone.utc).isoformat(),))
+            text, kb = questions_text()
+            tg("editMessageText", {"chat_id": cfg["CHAT_ID"], "message_id": q["message"]["message_id"], "text": text,
+                                   "parse_mode": "HTML", "reply_markup": kb})
+        tg("answerCallbackQuery", {"callback_query_id": q["id"]})
+        return
     if q and str(q.get("data", "")).startswith("c:"):
         return client_callback(q)
     if q and str(q.get("data", "")).startswith("up:"):  # переключение периода в списке записей
@@ -794,7 +879,8 @@ def handle_update(u):
         if text.split(maxsplit=1)[-1].strip() == cfg["REPORT_KEY"]:
             cfg["CHAT_ID"] = str(chat)
             save_config()
-            tg("sendMessage", {"chat_id": chat, "text": "Готово: заявки с сайта теперь будут приходить в этот чат.\n/report — сводка по заявкам."})
+            tg("sendMessage", {"chat_id": chat, "reply_markup": ADMIN_KB,
+                               "text": "Готово: заявки с сайта теперь будут приходить в этот чат. Кнопки внизу — записи, вопросы клиентов и сводка."})
             log("Администратор подключён, chat_id", chat)
             set_commands()
             threading.Thread(target=resend_pending, daemon=True).start()
@@ -802,12 +888,21 @@ def handle_update(u):
             tg("sendMessage", {"chat_id": chat, "text": "Неверный пароль. Отправьте: /admin ПАРОЛЬ (REPORT_KEY из config.json)."})
     elif text.startswith("/start"):
         if is_admin:
-            tg("sendMessage", {"chat_id": chat, "text": "Вы администратор: сюда приходят заявки. /report — сводка, /update — обновить сервер.\n"
-                               "После «Подтвердил запись» бот спросит время — ответьте на его сообщение, и клиент получит подтверждение."})
+            tg("sendMessage", {"chat_id": chat, "reply_markup": ADMIN_KB,
+                               "text": "Вы администратор: сюда приходят заявки и вопросы клиентов.\n\n"
+                                       "Кнопки внизу: «Записи» — расписание, «Вопросы от клиентов» — на что ещё не ответили, «Сводка» — статистика.\n"
+                                       "После «Подтвердил запись» бот спросит время — ответьте на его сообщение, и клиент получит подтверждение."})
         else:
             client_hello(chat)
     elif text.startswith("/update") and is_admin:
         threading.Thread(target=check_update, args=(True,), daemon=True).start()
+    elif is_admin and (text.split("@")[0] == "/questions" or text == "Вопросы от клиентов"):
+        qt, kb = questions_text()
+        tg("sendMessage", {"chat_id": chat, "text": qt, "parse_mode": "HTML", "reply_markup": kb})
+    elif is_admin and text == "Записи":
+        send_upcoming(chat, "all")
+    elif is_admin and text == "Сводка":
+        tg("sendMessage", {"chat_id": chat, "text": report_text(), "parse_mode": "HTML", "disable_web_page_preview": True})
     elif is_admin and text.split("@")[0] in ("/today", "/tomorrow", "/week", "/upcoming"):
         send_upcoming(chat, {"/today": "today", "/tomorrow": "tomorrow", "/week": "week"}.get(text.split("@")[0], "all"))
     elif text.startswith("/report") and is_admin:
@@ -816,8 +911,9 @@ def handle_update(u):
         if not is_admin or client_leads(chat):  # админ, проверяющий запись на себе, тоже пишет «как клиент»
             client_message(chat, text[:1000], m)
         else:
-            tg("sendMessage", {"chat_id": chat, "text": "Чтобы ответить клиенту, нажмите кнопку «Ответить» под его сообщением. "
-                                                       "Записи — /upcoming, сводка — /report."})
+            tg("sendMessage", {"chat_id": chat, "reply_markup": ADMIN_KB,
+                               "text": "Чтобы ответить клиенту, нажмите кнопку «Ответить» под его сообщением "
+                                       "или откройте «Вопросы от клиентов»."})
 
 
 def poll_loop():
