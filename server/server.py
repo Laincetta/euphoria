@@ -839,41 +839,43 @@ def digest_loop():
             log("Ошибка утренней сводки:", e)
 
 
-def lead_line(n, l):
-    """Одна заявка — одна строка, словами: дата, имя, телефон, все услуги, сумма, время, связь, статус."""
-    sv = "; ".join(s["name"] for s in json.loads(l["services"])) or "—"
+def lead_block(l):
+    """Заявка блоком в столбик: дата и статус, клиент, услуги, сумма и время, связь."""
+    sv = "\n".join(esc(s["name"]) for s in json.loads(l["services"])) or "—"
     when = ("запись " + fmt_appt(l["appt_at"])) if l["appt_at"] else ("хочет " + fmt_day(l["day"]) + ", " + WIN.get(l["win"], ""))
     total = ("от " if l["total_from"] else "") + rub(l["total"]) + " ₽"
-    how = CONTACT.get(l["contact"], l["contact"]) + (" (бот подключён)" if l["client_chat"] else "")
-    return (f"{n}. {fmt_time(l['created_at'])} — <b>{esc(l['name'])}</b>, {esc(l['phone'])} — {esc(sv)} — {total} — "
-            f"{esc(when)} — {esc(how)} — <b>{STATUS.get(l['status'], l['status'])}</b>")
+    how = {"telegram": "Telegram" + (", бот подключён" if l["client_chat"] else ""), "max": "MAX", "call": "звонок"}.get(l["contact"], l["contact"])
+    return (f"<b>{fmt_time(l['created_at'])} · {STATUS.get(l['status'], l['status'])}</b>\n"
+            f"{esc(l['name'])}, {nice_phone(l['phone'])}\n{sv}\n{total} · {esc(when)}\nСвязь: {esc(how)}")
 
 
 def report_text():
-    def counts(days):
-        ls = all_leads(days)
-        c = lambda *s: sum(1 for l in ls if l["status"] in s)
-        money = sum(int(l["total"] or 0) for l in ls if l["status"] == "came")
-        return (f"<b>За {days} дней:</b> заявок {len(ls)}, подтверждено {c('confirmed', 'came')}, пришли {c('came')}"
-                f"{f' (на {rub(money)} ₽)' if money else ''}, не дозвонились {c('noanswer')}, отмен {c('cancelled')}, "
-                f"без статуса {c('new')}.")
+    w, m = all_leads(7), all_leads(30)
+    c = lambda ls, *s: sum(1 for l in ls if l["status"] in s)
+    money = lambda ls: sum(int(l["total"] or 0) for l in ls if l["status"] == "came")
+    conv = lambda ls: f"{round(100 * c(ls, 'came') / len(ls))}%" if ls else "—"
+    rows = [("Заявок", len(w), len(m)), ("Подтверждено", c(w, "confirmed", "came"), c(m, "confirmed", "came")),
+            ("Пришли", c(w, "came"), c(m, "came")), ("Дошли до визита", conv(w), conv(m)),
+            ("Выручка, ₽", rub(money(w)), rub(money(m))), ("Не дозвонились", c(w, "noanswer"), c(m, "noanswer")),
+            ("Отмены", c(w, "cancelled"), c(m, "cancelled")), ("Ждут звонка", c(w, "new"), c(m, "new"))]
+    table = [f"{'':<16}{'7 дн':>7}{'30 дн':>8}"] + [f"{a:<16}{str(b):>7}{str(d):>8}" for a, b, d in rows]
     top = {}
-    for l in all_leads(30):
+    for l in m:
         for s in json.loads(l["services"]):
             top[s["name"]] = top.get(s["name"], 0) + 1
-    best = ", ".join(f"{esc(n)} ({c})" for n, c in sorted(top.items(), key=lambda x: -x[1])[:5]) or "—"
-    last = all_leads()[:20]
-    out = ["<b>Сводка по заявкам</b>", "", counts(7), counts(30), "", f"<b>Чаще выбирали за 30 дней:</b> {best}", "",
-           f"<b>Последние заявки ({len(last)}):</b>" if last else "Заявок пока нет."]
-    out += [lead_line(i, l) for i, l in enumerate(last, 1)]
+    best = sorted(top.items(), key=lambda x: -x[1])[:5]
+    out = ["<b>Сводка по заявкам</b>", "<pre>" + esc("\n".join(table)) + "</pre>"]
+    if best:
+        out += ["<b>Популярные услуги за 30 дней</b>"] + [f"{i}. {esc(n)} — {k}" for i, (n, k) in enumerate(best, 1)]
+    last = all_leads()[:15]
+    blocks = [lead_block(l) for l in last]
+    out += ["", f"<b>Последние заявки ({len(last)})</b>" if last else "Заявок пока нет.", "—" * 12]
     site = (cfg.get("SITE_URL") or "").rstrip("/")
-    out += ["", f'<a href="{html.escape(site)}/admin?key={urllib.parse.quote(cfg["REPORT_KEY"])}">Все заявки таблицей</a>' if site
-            else "Все заявки таблицей — страница admin на сервере (ссылка в окне сервера)."]
-    text = "\n".join(out)
-    while len(text) > 4000 and len(out) > 10:  # лимит сообщения Telegram — убираем самые старые строки
-        out.pop(-3)
-        text = "\n".join(out)
-    return text
+    tail = ["", f'<a href="{html.escape(site)}/admin?key={urllib.parse.quote(cfg["REPORT_KEY"])}">Все заявки таблицей</a>' if site
+            else "Все заявки таблицей — страница admin на сервере."]
+    while blocks and len("\n".join(out + ["\n\n".join(blocks)] + tail)) > 4000:  # лимит сообщения — убираем самые старые
+        blocks.pop()
+    return "\n".join(out + ["\n\n".join(blocks)] + tail)
 
 
 def summary(days):
