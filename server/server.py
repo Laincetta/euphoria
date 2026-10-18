@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     "PORT": 8080,
     "SALON_NAME": "Эйфория",
     "SALON_ADDRESS": "Реутов, Парковая улица, 8",
-    "SALON_PHONE": "",
+    "SALON_PHONE": "+7 (965) 340-82-87",
     "SITE_URL": "",  # адрес страницы записи, когда сервер будет в интернете
     "REVIEW_URL": "",  # ссылка на отзывы в Яндекс Картах — бот попросит отзыв после визита
     # оператор персональных данных — для страниц /consent и /privacy (данные владелицы или её ИП/ООО)
@@ -287,7 +287,7 @@ def set_appt(l, when, admin_chat):
     l = get_lead(l["id"])
     refresh_admin_msg(l)
     sent = to_client(l, f"✅ Вы записаны в салон «{cfg['SALON_NAME']}»\n{fmt_appt(l['appt_at'])}\n{services_line(l)}\n\n"
-                        f"Адрес: {cfg['SALON_ADDRESS']}\nЕсли планы изменятся — просто напишите сюда.")
+                        f"Адрес: {cfg['SALON_ADDRESS']}\nТелефон салона: {salon_phone()}\nЕсли планы изменятся — просто напишите сюда.")
     tg("sendMessage", {"chat_id": admin_chat, "text": f"Готово: {l['name']} — {fmt_appt(l['appt_at'])}. " + (
         "Клиенту ушло подтверждение, напомним за сутки и за 2 часа." if sent else
         {"call": "Клиент выбрал звонок", "max": "Клиент выбрал MAX"}.get(l["contact"], "Клиент не подключил бота") +
@@ -311,9 +311,13 @@ def client_start(chat, tok, first_name):
     log("Клиент подключил уведомления:", l["id"], l["name"])
 
 
+def salon_phone():
+    return cfg.get("SALON_PHONE") or DEFAULT_CONFIG["SALON_PHONE"]
+
+
 def client_hello(chat):
     tg("sendMessage", {"chat_id": chat, "text": f"Здравствуйте! Это бот салона «{cfg['SALON_NAME']}», {cfg['SALON_ADDRESS']}. "
-                       "Сюда приходят подтверждения записи и напоминания." +
+                       f"Сюда приходят подтверждения записи и напоминания. Телефон: {salon_phone()}" +
                        (f"\nЗаписаться: {cfg['SITE_URL']}" if cfg.get("SITE_URL") else "")})
 
 
@@ -379,7 +383,7 @@ def reminder_loop():
                                           ("rem2", timedelta(hours=2), "Через 2 часа ждём вас в салоне «{n}»\n{t}")]:
                     if not l[col] and now >= when - before:
                         t = fmt_appt(l["appt_at"]) + "\n" + services_line(l) + "\nАдрес: " + cfg["SALON_ADDRESS"]
-                        ok = to_client(l, text.format(n=cfg["SALON_NAME"], t=t) + "\nЕсли не получается прийти — напишите сюда.")
+                        ok = to_client(l, text.format(n=cfg["SALON_NAME"], t=t) + f"\nЕсли не получается прийти — напишите сюда или позвоните: {salon_phone()}")
                         with db_lock, db() as con:
                             con.execute(f"UPDATE leads SET {col}=1 WHERE id=?", (l["id"],))
                         log("Напоминание", col, l["id"], "отправлено" if ok else "не доставлено")

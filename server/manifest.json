@@ -1,9 +1,9 @@
 {
-  "version": "9592655f627e",
-  "built": "18.10.2026 23:48",
-  "note": "Исправлено: кнопки выбора связи не пропадают после выбора MAX",
+  "version": "495ca8b0d62f",
+  "built": "19.10.2026 00:26",
+  "note": "Телефон для записи +7 (965) 340-82-87 на странице и в сообщениях бота",
   "files": {
-    "server.py": "ee027dd7a2832549df36dd8b34d690e8339dac944df4f5f6cc816658168b427f",
-    "public/index.html": "926dff35b41cd1be2b1f477cc551ae3aa2340f864cb3bff60a99a387b6c5402d"
+    "server.py": "4107c3354720356e948c1ab88396358d0bd7adef846ccc9d0255ded65e50b15e",
+    "public/index.html": "3b15d328c9e0c5731f53b8039bc913170394f1c297ad7a3b22650089959bcf94"
   }
 }
