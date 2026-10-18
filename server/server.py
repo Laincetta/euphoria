@@ -400,7 +400,10 @@ def set_commands():
     tg("setMyCommands", {"commands": [{"command": "start", "description": "О салоне"}]})
     if cfg.get("CHAT_ID"):
         tg("setMyCommands", {"scope": {"type": "chat", "chat_id": int(cfg["CHAT_ID"])},
-                             "commands": [{"command": "upcoming", "description": "Предстоящие записи"},
+                             "commands": [{"command": "today", "description": "Записи на сегодня"},
+                                          {"command": "tomorrow", "description": "Записи на завтра"},
+                                          {"command": "week", "description": "Записи на неделю"},
+                                          {"command": "upcoming", "description": "Все предстоящие записи"},
                                           {"command": "report", "description": "Сводка по заявкам"},
                                           {"command": "update", "description": "Обновить сервер"}]})
 
@@ -446,26 +449,43 @@ def appt_block(l, with_time=True):
     return "\n".join(lines)
 
 
-def upcoming_text(only_today=False):
+def plural(n, one, few, many):
+    n = abs(n) % 100
+    return one if n % 10 == 1 and n != 11 else few if 2 <= n % 10 <= 4 and not 12 <= n <= 14 else many
+
+
+PERIODS = {"today": "Сегодня", "tomorrow": "Завтра", "week": "Неделя", "all": "Все"}
+
+
+def period_keyboard(cur):
+    return {"inline_keyboard": [[{"text": ("• " if k == cur else "") + n, "callback_data": f"up:{k}"} for k, n in PERIODS.items()]]}
+
+
+def upcoming_text(period="all"):
     now = datetime.now(MSK)
     today = now.date()
     with db_lock, db() as con:
         rows = con.execute("SELECT * FROM leads WHERE appt_at IS NOT NULL AND status IN ('confirmed','came')").fetchall()
         pend = con.execute("SELECT * FROM leads WHERE appt_at IS NULL AND status IN ('new','noanswer') ORDER BY created_at").fetchall()
-    rows = sorted([l for l in rows if datetime.fromisoformat(l["appt_at"]) >= now - timedelta(hours=1)],
-                  key=lambda l: l["appt_at"])
-    if only_today:
-        rows = [l for l in rows if datetime.fromisoformat(l["appt_at"]).astimezone(MSK).date() == today]
-    out = [f"<b>Записи на сегодня, {day_title(now, today).split(', ', 1)[1]}</b>" if only_today else "<b>Предстоящие записи</b>"]
+    rows = sorted([l for l in rows if datetime.fromisoformat(l["appt_at"]) >= now - timedelta(hours=1)], key=lambda l: l["appt_at"])
+    date_of = lambda l: datetime.fromisoformat(l["appt_at"]).astimezone(MSK).date()
+    span = {"today": (0, 0), "tomorrow": (1, 1), "week": (0, 6)}.get(period)
+    if span:
+        rows = [l for l in rows if span[0] <= (date_of(l) - today).days <= span[1]]
+    one_day = period in ("today", "tomorrow")
+    if one_day:
+        d = now + timedelta(days=span[0])
+        title = f"Записи на {PERIODS[period].lower()}, {day_title(d, today).split(', ', 1)[1]}"
+    else:
+        title = {"week": "Записи на неделю", "all": "Все предстоящие записи"}[period]
+    total = sum(int(l["total"] or 0) for l in rows)
+    out = [f"<b>{title}</b>", f"{len(rows)} {plural(len(rows), 'запись', 'записи', 'записей')} на {rub(total)} ₽" if rows else "Записей нет."]
     day = None
     for l in rows:
-        d = datetime.fromisoformat(l["appt_at"]).astimezone(MSK)
-        if d.date() != day and not only_today:
-            day = d.date()
-            out += ["", f"<b>{day_title(d, today)}</b>", "—" * 12]
+        if not one_day and date_of(l) != day:
+            day = date_of(l)
+            out += ["", f"<b>{day_title(datetime.fromisoformat(l['appt_at']).astimezone(MSK), today)}</b>", "—" * 12]
         out += ["", appt_block(l)]
-    if not rows:
-        out += ["", "Записей нет." if only_today else "Подтверждённых записей пока нет."]
     pend = [l for l in pend if datetime.fromisoformat(l["created_at"]) >= datetime.now(timezone.utc) - timedelta(days=14)]
     if pend:
         out += ["", "", f"<b>Ждут звонка и подтверждения ({len(pend)})</b>", "—" * 12]
@@ -476,6 +496,10 @@ def upcoming_text(only_today=False):
     return text if len(text) < 4000 else text[:3980] + "\n…"
 
 
+def send_upcoming(chat, period):
+    tg("sendMessage", {"chat_id": chat, "text": upcoming_text(period), "parse_mode": "HTML", "reply_markup": period_keyboard(period)})
+
+
 def digest_loop():
     sent_for = None
     while True:
@@ -484,7 +508,7 @@ def digest_loop():
             h, now = int(cfg.get("DIGEST_HOUR") or 0), datetime.now(MSK)
             if h and cfg.get("CHAT_ID") and now.hour == h and sent_for != now.date():
                 sent_for = now.date()
-                tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": upcoming_text(only_today=True), "parse_mode": "HTML"})
+                send_upcoming(cfg["CHAT_ID"], "today")
                 log("Утренняя сводка записей отправлена")
         except Exception as e:
             log("Ошибка утренней сводки:", e)
@@ -541,6 +565,13 @@ def summary(days):
 
 def handle_update(u):
     q = u.get("callback_query")
+    if q and str(q.get("data", "")).startswith("up:"):  # переключение периода в списке записей
+        k = q["data"][3:]
+        if k in PERIODS and str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
+            tg("editMessageText", {"chat_id": cfg["CHAT_ID"], "message_id": q["message"]["message_id"], "text": upcoming_text(k),
+                                   "parse_mode": "HTML", "reply_markup": period_keyboard(k)})
+        tg("answerCallbackQuery", {"callback_query_id": q["id"]})
+        return
     if q:
         parts = str(q.get("data", "")).split(":")
         if len(parts) != 3 or (parts[2] not in STATUS and parts[2] != "edit") or str(q["message"]["chat"]["id"]) != str(cfg["CHAT_ID"]):
@@ -598,8 +629,8 @@ def handle_update(u):
             client_hello(chat)
     elif text.startswith("/update") and is_admin:
         threading.Thread(target=check_update, args=(True,), daemon=True).start()
-    elif text.startswith("/upcoming") and is_admin:
-        tg("sendMessage", {"chat_id": chat, "text": upcoming_text(), "parse_mode": "HTML"})
+    elif is_admin and text.split("@")[0] in ("/today", "/tomorrow", "/week", "/upcoming"):
+        send_upcoming(chat, {"/today": "today", "/tomorrow": "tomorrow", "/week": "week"}.get(text.split("@")[0], "all"))
     elif text.startswith("/report") and is_admin:
         tg("sendMessage", {"chat_id": chat, "text": report_text(), "parse_mode": "HTML", "disable_web_page_preview": True})
     elif not is_admin and not text.startswith("/"):

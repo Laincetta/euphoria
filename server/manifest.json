@@ -1,9 +1,9 @@
 {
-  "version": "1fe927a12e86",
-  "built": "19.10.2026 00:36",
-  "note": "Команда /upcoming — предстоящие записи по дням в столбик; утренняя сводка записей на день в 9:00",
+  "version": "afac4e6602dd",
+  "built": "19.10.2026 00:37",
+  "note": "Записи на сегодня, завтра, неделю и все — команды /today /tomorrow /week /upcoming и кнопки переключения под списком",
   "files": {
-    "server.py": "d98c96ebc182ab99a99a1961ded1ece02b011ac9a6a49dcbb5ba56fc786a0059",
+    "server.py": "e6a8740224dec0d9722ae23286c36d7dbd0b11349b0178beb9d3be0ec9f27ac1",
     "public/index.html": "3b15d328c9e0c5731f53b8039bc913170394f1c297ad7a3b22650089959bcf94"
   }
 }
