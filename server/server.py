@@ -125,7 +125,8 @@ def init_db():
             day TEXT, win TEXT, contact TEXT, comment TEXT, status TEXT DEFAULT 'new', status_at TEXT, status_by TEXT, message_id INTEGER)""")
         have = [r[1] for r in con.execute("PRAGMA table_info(leads)")]
         for col, typ in [("handle", "TEXT"), ("tok", "TEXT"), ("client_chat", "TEXT"), ("appt_at", "TEXT"),
-                         ("rem24", "INTEGER DEFAULT 0"), ("rem2", "INTEGER DEFAULT 0")]:  # обновление старой базы
+                         ("rem24", "INTEGER DEFAULT 0"), ("rem2", "INTEGER DEFAULT 0"),
+                         ("client_ok", "INTEGER DEFAULT 0")]:  # обновление старой базы
             if col not in have:
                 con.execute(f"ALTER TABLE leads ADD COLUMN {col} {typ}")
         # какое сообщение в чате админа к какой заявке относится: вопрос о времени, пересланное сообщение клиента
@@ -234,7 +235,7 @@ def lead_text(l):
         out.append("<b>Уведомления:</b> " + ("🔔 клиент подключил бота — подтверждение и напоминания уйдут сами" if l["client_chat"]
                                               else "⏳ клиент ещё не открыл бота — пока пишите ему сами"))
     if l["appt_at"]:
-        out.append(f"<b>Записан(а):</b> {fmt_appt(l['appt_at'])}")
+        out.append(f"<b>Записан(а):</b> {fmt_appt(l['appt_at'])}" + (" — клиент подтвердил, что придёт" if l["client_ok"] else ""))
     if l["status"] and l["status"] != "new":
         out += ["", f"<b>Статус: {STATUS[l['status']]}</b> · {esc(l['status_by'] or '')} {fmt_time(l['status_at'])}"]
     return "\n".join(out)
@@ -271,9 +272,9 @@ def services_line(l):
     return ", ".join(s["name"] for s in json.loads(l["services"]))
 
 
-def to_client(l, text):
+def to_client(l, text, kb=None):
     if l and l["client_chat"]:
-        r = tg("sendMessage", {"chat_id": l["client_chat"], "text": text})
+        r = tg("sendMessage", dict({"chat_id": l["client_chat"], "text": text}, **({"reply_markup": kb} if kb else {})))
         if not r.get("ok"):
             log("Клиенту", l["name"], "не доставлено:", r.get("description"))
         return r.get("ok")
@@ -289,13 +290,72 @@ def set_appt(l, when, admin_chat):
                      datetime.now(timezone.utc).isoformat(), l["id"]))
     l = get_lead(l["id"])
     refresh_admin_msg(l)
-    sent = to_client(l, f"✅ Вы записаны в салон «{cfg['SALON_NAME']}»\n{fmt_appt(l['appt_at'])}\n{services_line(l)}\n\n"
-                        f"Адрес: {cfg['SALON_ADDRESS']}\nТелефон салона: {salon_phone()}\nЕсли планы изменятся — просто напишите сюда.")
+    sent = to_client(l, f"Вы записаны в салон «{cfg['SALON_NAME']}»\n\n{fmt_appt(l['appt_at'])}\n{services_line(l)}\n\n"
+                        f"Адрес: {cfg['SALON_ADDRESS']}\nТелефон: {salon_phone()}\n\nНапомним за сутки и за 2 часа до визита.",
+                     appt_kb(l))
     tg("sendMessage", {"chat_id": admin_chat, "text": f"Готово: {l['name']} — {fmt_appt(l['appt_at'])}. " + (
         "Клиенту ушло подтверждение, напомним за сутки и за 2 часа." if sent else
         {"call": "Клиент выбрал звонок", "max": "Клиент выбрал MAX"}.get(l["contact"], "Клиент не подключил бота") +
         " — подтвердите ему сами. За сутки до визита бот напомнит вам связаться с ним.")})
     log("Время записи", l["id"], "→", fmt_appt(l["appt_at"]))
+
+
+def route_url():
+    return "https://yandex.ru/maps/?rtext=~" + urllib.parse.quote(cfg["SALON_ADDRESS"]) + "&rtt=auto"
+
+
+def cb(text, data):
+    return {"text": text, "callback_data": data}
+
+
+def menu_kb():
+    rows = [[cb("Моя запись", "c:my")], [cb("Написать администратору", "c:ask")],
+            [{"text": "Как добраться", "url": route_url()}]]
+    if cfg.get("SITE_URL"):
+        rows.insert(1, [{"text": "Записаться на сайте", "url": cfg["SITE_URL"]}])
+    return {"inline_keyboard": rows}
+
+
+def appt_kb(l):
+    """Кнопки под записью клиента — зависят от её состояния."""
+    rows = []
+    if l["status"] == "confirmed" and l["appt_at"]:
+        if not l["client_ok"]:
+            rows.append([cb("Приду", f"c:yes:{l['id']}")])
+        rows.append([cb("Перенести", f"c:move:{l['id']}"), cb("Отменить запись", f"c:cancel:{l['id']}")])
+    elif l["status"] in ("new", "noanswer", "confirmed"):
+        rows.append([cb("Изменить пожелания", f"c:move:{l['id']}"), cb("Отменить заявку", f"c:cancel:{l['id']}")])
+    rows.append([{"text": "Как добраться", "url": route_url()}, cb("Меню", "c:menu")])
+    return {"inline_keyboard": rows}
+
+
+def client_leads(chat):
+    with db_lock, db() as con:
+        return con.execute("SELECT * FROM leads WHERE client_chat=? ORDER BY created_at DESC LIMIT 10", (str(chat),)).fetchall()
+
+
+def active_lead(chat):
+    now = datetime.now(MSK)
+    for l in client_leads(chat):
+        if l["status"] in ("new", "noanswer") or (l["status"] == "confirmed" and (not l["appt_at"] or
+                                                   datetime.fromisoformat(l["appt_at"]) >= now - timedelta(hours=1))):
+            return l
+    return None
+
+
+def my_text(l):
+    if not l:
+        return ("Сейчас у вас нет активных записей." + (f"\nЗаписаться можно на сайте или по телефону {salon_phone()}."
+                                                         if cfg.get("SITE_URL") else f"\nЗаписаться можно по телефону {salon_phone()}."))
+    if l["status"] == "confirmed" and l["appt_at"]:
+        head = "Ваша запись подтверждена" + (" — вы отметили, что придёте" if l["client_ok"] else "")
+        when = fmt_appt(l["appt_at"])
+    else:
+        head = "Заявка принята, администратор скоро свяжется"
+        when = f"хотели бы: {fmt_day(l['day'])}, {WIN.get(l['win'], '')}"
+    total = ("от " if l["total_from"] else "") + rub(l["total"]) + " ₽"
+    return (f"{head}\n\n{when}\n{services_line(l)}\nСтоимость: {total}\n\n"
+            f"Салон «{cfg['SALON_NAME']}», {cfg['SALON_ADDRESS']}\nТелефон: {salon_phone()}")
 
 
 def client_start(chat, tok, first_name):
@@ -307,9 +367,11 @@ def client_start(chat, tok, first_name):
         return client_hello(chat)
     l = get_lead(l["id"])
     w = WIN.get(l["win"], "")
-    tg("sendMessage", {"chat_id": chat, "text": f"Здравствуйте, {l['name']}! Заявка в салон «{cfg['SALON_NAME']}» получена:\n"
-                       f"{services_line(l)}\nКогда удобно: {fmt_day(l['day'])}, {w}\n\n"
-                       "Администратор свяжется с вами и подтвердит точное время. Подтверждение и напоминание придут сюда."})
+    tg("sendMessage", {"chat_id": chat, "reply_markup": appt_kb(l),
+                       "text": f"Здравствуйте, {l['name']}! Заявка в салон «{cfg['SALON_NAME']}» получена.\n\n"
+                               f"{services_line(l)}\nКогда удобно: {fmt_day(l['day'])}, {w}\n\n"
+                               "Администратор позвонит или напишет и подтвердит точное время. "
+                               "Подтверждение и напоминания придут сюда."})
     refresh_admin_msg(l)
     log("Клиент подключил уведомления:", l["id"], l["name"])
 
@@ -319,21 +381,89 @@ def salon_phone():
 
 
 def client_hello(chat):
-    tg("sendMessage", {"chat_id": chat, "text": f"Здравствуйте! Это бот салона «{cfg['SALON_NAME']}», {cfg['SALON_ADDRESS']}. "
-                       f"Сюда приходят подтверждения записи и напоминания. Телефон: {salon_phone()}" +
-                       (f"\nЗаписаться: {cfg['SITE_URL']}" if cfg.get("SITE_URL") else "")})
+    l = active_lead(chat)
+    text = (f"Салон красоты «{cfg['SALON_NAME']}»\n{cfg['SALON_ADDRESS']}, ежедневно 10:00–21:00\nТелефон: {salon_phone()}\n\n"
+            "Здесь приходят подтверждения записи и напоминания. Можно посмотреть свою запись, перенести или отменить её "
+            "и написать администратору.")
+    tg("sendMessage", {"chat_id": chat, "text": text, "reply_markup": menu_kb() if not l else
+                       {"inline_keyboard": [[cb("Моя запись", "c:my")], [cb("Написать администратору", "c:ask")],
+                                            [{"text": "Как добраться", "url": route_url()}]]}})
+
+
+def notify_admin(l, text, fwd=True):
+    if not cfg.get("CHAT_ID"):
+        return
+    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": text + ("\n\nОтветьте на это сообщение — ответ уйдёт клиенту." if fwd else "")})
+    if fwd and r.get("ok"):
+        map_msg(r["result"]["message_id"], l["id"], "fwd")
+
+
+def who(l):
+    return f"{l['name']} ({nice_phone(l['phone'])})"
+
+
+def client_callback(q):
+    """Кнопки клиента: c:my, c:menu, c:ask, c:yes:ID, c:move:ID, c:cancel:ID, c:cancelok:ID."""
+    chat, mid = q["message"]["chat"]["id"], q["message"]["message_id"]
+    parts = q["data"].split(":")
+    act, lid = parts[1], (parts[2] if len(parts) > 2 else "")
+    ans = lambda text="": tg("answerCallbackQuery", {"callback_query_id": q["id"], "text": text})
+    edit = lambda text, kb: tg("editMessageText", {"chat_id": chat, "message_id": mid, "text": text, "reply_markup": kb})
+    if act == "my":
+        l = active_lead(chat)
+        ans()
+        return tg("sendMessage", {"chat_id": chat, "text": my_text(l), "reply_markup": appt_kb(l) if l else menu_kb()})
+    if act == "menu":
+        ans()
+        return client_hello(chat)
+    if act == "ask":
+        ans()
+        return tg("sendMessage", {"chat_id": chat, "text": "Напишите сообщение одним текстом — администратор ответит здесь."})
+    l = get_lead(lid) if lid else None
+    if not l or l["client_chat"] != str(chat):
+        return ans("Запись не найдена")
+    if act == "yes":
+        with db_lock, db() as con:
+            con.execute("UPDATE leads SET client_ok=1 WHERE id=?", (l["id"],))
+        l = get_lead(l["id"])
+        refresh_admin_msg(l)
+        notify_admin(l, f"{who(l)} подтвердил(а), что придёт: {fmt_appt(l['appt_at'])}.", fwd=False)
+        ans("Спасибо! Ждём вас")
+        return tg("editMessageReplyMarkup", {"chat_id": chat, "message_id": mid, "reply_markup": appt_kb(l)})
+    if act == "move":
+        when = fmt_appt(l["appt_at"]) if l["appt_at"] else f"{fmt_day(l['day'])}, {WIN.get(l['win'], '')}"
+        notify_admin(l, f"{who(l)} просит перенести запись ({when}). Клиент сейчас напишет удобное время — или позвоните ему.")
+        ans()
+        return tg("sendMessage", {"chat_id": chat, "text": "Напишите, когда вам удобно — например «в четверг после 18:00». "
+                                                           "Администратор подберёт время и ответит здесь."})
+    if act == "cancel":
+        ans()
+        return edit(my_text(l) + "\n\nТочно отменить?",
+                    {"inline_keyboard": [[cb("Да, отменить", f"c:cancelok:{l['id']}"), cb("Нет", f"c:keep:{l['id']}")]]})
+    if act == "keep":
+        ans()
+        return edit(my_text(l), appt_kb(l))
+    if act == "cancelok":
+        with db_lock, db() as con:
+            con.execute("UPDATE leads SET status='cancelled', status_at=?, status_by=? WHERE id=?",
+                        (datetime.now(timezone.utc).isoformat(), "клиент", l["id"]))
+        l = get_lead(l["id"])
+        refresh_admin_msg(l)
+        when = fmt_appt(l["appt_at"]) if l["appt_at"] else f"заявка на {fmt_day(l['day'])}"
+        notify_admin(l, f"{who(l)} отменил(а) запись: {when}, {services_line(l)}.", fwd=False)
+        log("Клиент отменил", l["id"])
+        ans("Запись отменена")
+        return edit(f"Запись отменена.\n\nЕсли захотите записаться снова — напишите сюда или позвоните: {salon_phone()}.", menu_kb())
+    ans()
 
 
 def client_message(chat, text, m):
-    with db_lock, db() as con:
-        l = con.execute("SELECT * FROM leads WHERE client_chat=? ORDER BY created_at DESC LIMIT 1", (str(chat),)).fetchone()
+    l = client_leads(chat)
+    l = l[0] if l else None
     if not l or not cfg.get("CHAT_ID"):
         return client_hello(chat)
-    r = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": f"💬 {l['name']} ({l['phone']}) пишет:\n{text}\n\n"
-                           "Ответьте на это сообщение — ответ уйдёт клиенту."})
-    if r.get("ok"):
-        map_msg(r["result"]["message_id"], l["id"], "fwd")
-        tg("sendMessage", {"chat_id": chat, "text": "Передали администратору ✓ Ответ придёт сюда."})
+    notify_admin(l, f"{who(l)} пишет:\n{text}")
+    tg("sendMessage", {"chat_id": chat, "text": "Передали администратору. Ответ придёт сюда."})
 
 
 def admin_reply(chat, text, reply_to):
@@ -387,7 +517,8 @@ def reminder_loop():
                     if not l[col] and now >= when - before:
                         t = fmt_appt(l["appt_at"]) + "\n" + services_line(l) + "\nАдрес: " + cfg["SALON_ADDRESS"]
                         d = {0: "сегодня", 1: "завтра"}.get((when.astimezone(MSK).date() - now.date()).days, "скоро")
-                        ok = to_client(l, text.format(n=cfg["SALON_NAME"], t=t, d=d) + f"\nЕсли не получается прийти — напишите сюда или позвоните: {salon_phone()}")
+                        ok = to_client(l, text.format(n=cfg["SALON_NAME"], t=t, d=d) + "\n\nЕсли планы изменились — нажмите «Перенести» или «Отменить».",
+                                       appt_kb(l))
                         with db_lock, db() as con:
                             con.execute(f"UPDATE leads SET {col}=1 WHERE id=?", (l["id"],))
                         log("Напоминание", col, l["id"], "отправлено" if ok else "не доставлено")
@@ -397,10 +528,10 @@ def reminder_loop():
 
 
 def set_commands():
-    tg("setMyCommands", {"commands": [{"command": "start", "description": "О салоне"}]})
+    tg("setMyCommands", {"commands": [{"command": "my", "description": "Моя запись"}, {"command": "start", "description": "Меню"}]})
     if cfg.get("CHAT_ID"):
         tg("setMyCommands", {"scope": {"type": "chat", "chat_id": int(cfg["CHAT_ID"])},
-                             "commands": [{"command": "upcoming", "description": "Записи: сегодня, завтра, неделя, все"},
+                             "commands": [{"command": "upcoming", "description": "Записи"},
                                           {"command": "report", "description": "Сводка по заявкам"},
                                           {"command": "update", "description": "Обновить сервер"}]})
 
@@ -567,6 +698,8 @@ def summary(days):
 
 def handle_update(u):
     q = u.get("callback_query")
+    if q and str(q.get("data", "")).startswith("c:"):
+        return client_callback(q)
     if q and str(q.get("data", "")).startswith("up:"):  # переключение периода в списке записей
         k = q["data"][3:]
         if k in PERIODS and str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
@@ -599,7 +732,7 @@ def handle_update(u):
             ask_time(l)
         if l and st == "cancelled" and prev and prev["status"] == "confirmed" and l["appt_at"]:
             to_client(l, f"Запись в салон «{cfg['SALON_NAME']}» на {fmt_appt(l['appt_at'])} отменена. "
-                         "Если захотите выбрать другое время — напишите сюда.")
+                         "Если захотите выбрать другое время — напишите сюда.", menu_kb())
         if l and st == "came" and prev and prev["status"] != "came" and cfg.get("REVIEW_URL"):
             to_client(l, f"Спасибо, что были у нас! Будем благодарны за отзыв — это пара минут: {cfg['REVIEW_URL']}")
         return
@@ -613,6 +746,9 @@ def handle_update(u):
             return
     if text.startswith("/start ") and len(text.split()) == 2:  # клиент пришёл по кнопке со страницы (админ тоже может проверить на себе)
         return client_start(chat, text.split(maxsplit=1)[1].strip(), (m.get("from") or {}).get("first_name", ""))
+    if text.split("@")[0] == "/my":
+        l = active_lead(chat)
+        return tg("sendMessage", {"chat_id": chat, "text": my_text(l), "reply_markup": appt_kb(l) if l else menu_kb()})
     if text.startswith("/admin"):
         if text.split(maxsplit=1)[-1].strip() == cfg["REPORT_KEY"]:
             cfg["CHAT_ID"] = str(chat)
