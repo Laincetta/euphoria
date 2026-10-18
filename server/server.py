@@ -58,6 +58,13 @@ DEFAULT_CONFIG = {
     "SALON_PHONE": "",
     "SITE_URL": "",  # адрес страницы записи, когда сервер будет в интернете
     "REVIEW_URL": "",  # ссылка на отзывы в Яндекс Картах — бот попросит отзыв после визита
+    # оператор персональных данных — для страниц /consent и /privacy (данные владелицы или её ИП/ООО)
+    "OPERATOR_NAME": "",  # например: ИП Иванова Анна Андреевна
+    "OPERATOR_INN": "",
+    "OPERATOR_OGRN": "",  # ОГРНИП или ОГРН
+    "OPERATOR_ADDRESS": "",
+    "OPERATOR_EMAIL": "",
+    "DATA_KEEP_DAYS": 365,  # заявки старше этого срока удаляются автоматически
     "TELEGRAM_API": "https://api.telegram.org",
     "UPDATE_REPO": "Laincetta/euphoria",  # пусто — обновления выключены
     "UPDATE_BRANCH": "main",
@@ -580,7 +587,7 @@ def clean_lead(b):
             "win": b.get("window") if b.get("window") in WIN else "any",
             "contact": b.get("contact") if b.get("contact") in CONTACT else "call", "comment": cut(b.get("comment"), 500)}
     lead["handle"] = norm_handle(lead["contact"], b.get("handle"))
-    ok = lead["name"] and len(re.sub(r"\D", "", lead["phone"])) >= 10 and services
+    ok = lead["name"] and len(re.sub(r"\D", "", lead["phone"])) >= 10 and services and b.get("consent") is True
     return lead if ok else None
 
 
@@ -668,6 +675,64 @@ th{{color:#8e8a86;font-weight:500}} td:nth-child(1),td:nth-child(3){{white-space
 {tr or '<tr><td colspan=9>Заявок пока нет</td></tr>'}</table></div><p style="margin-top:12px">Статусы меняются кнопками под заявкой в Telegram.</p></main></body></html>"""
 
 
+def operator_line():
+    miss = '<mark>не заполнено — впишите в config.json</mark>'
+    f = lambda k: esc(cfg.get(k)) or miss
+    return (f"{f('OPERATOR_NAME')}, ИНН {f('OPERATOR_INN')}, ОГРН/ОГРНИП {f('OPERATOR_OGRN')}, адрес: {f('OPERATOR_ADDRESS')}, "
+            f"e-mail: {f('OPERATOR_EMAIL')}")
+
+
+def legal_html(kind):
+    salon, keep = esc(cfg["SALON_NAME"]), int(cfg.get("DATA_KEEP_DAYS") or 365)
+    data = ("имя; номер телефона; выбранный мессенджер (Telegram или MAX) и, если вы его указали, ник или ссылка на профиль; "
+            "идентификатор чата Telegram — если вы подключили бота салона; выбранные услуги, желаемые день и время; комментарий к заявке")
+    purposes = ("запись на услуги салона; связь с вами для подтверждения записи; отправка подтверждения, напоминаний о визите "
+                "и ответов на ваши сообщения; учёт заявок салоном")
+    if kind == "consent":
+        title = "Согласие на обработку персональных данных"
+        body = f"""<p>Я, отправляя заявку на сайте салона «{salon}», свободно, своей волей и в своём интересе даю согласие оператору:
+{operator_line()} — на обработку моих персональных данных на следующих условиях.</p>
+<p><b>Цели:</b> {purposes}.</p>
+<p><b>Данные:</b> {data}.</p>
+<p><b>Действия:</b> сбор, запись, систематизация, хранение, уточнение, использование, передача (предоставление доступа) в пределах целей, удаление, уничтожение. Обработка автоматизированная.</p>
+<p><b>Передача:</b> заявка передаётся администратору салона через мессенджер Telegram (Telegram FZ-LLC и связанные лица; серверы могут находиться за пределами РФ — трансграничная передача), а если вы выбрали MAX — через мессенджер MAX. Другим лицам данные не передаются и не продаются.</p>
+<p><b>Срок:</b> согласие действует до достижения целей, но не дольше {keep} дней с даты заявки; после этого данные удаляются.</p>
+<p><b>Отзыв:</b> согласие можно отозвать в любой момент — написать на {esc(cfg.get('OPERATOR_EMAIL')) or 'e-mail оператора'}
+или сообщением боту салона в Telegram. Данные удаляются в течение 10 рабочих дней.</p>"""
+    else:
+        title = "Политика обработки персональных данных"
+        body = f"""<p>Оператор: {operator_line()}.</p>
+<p><b>Какие данные собираем и зачем.</b> Только данные из формы записи: {data}. Цели: {purposes}. Данные не используются для рекламных рассылок.</p>
+<p><b>Основание.</b> Согласие на обработку персональных данных, которое вы даёте отдельно при отправке заявки (<a href="/consent">текст согласия</a>).</p>
+<p><b>Как храним.</b> Заявки хранятся в базе данных на сервере салона. Доступ есть только у администратора салона.
+Заявка отправляется администратору через Telegram (или MAX). Срок хранения — не дольше {keep} дней, затем заявка удаляется автоматически.</p>
+<p><b>Ваши права.</b> Вы можете узнать, какие ваши данные хранятся, попросить их исправить или удалить и отозвать согласие —
+написав на {esc(cfg.get('OPERATOR_EMAIL')) or 'e-mail оператора'} или сообщением боту салона. Ответим в течение 10 рабочих дней.</p>
+<p><b>Cookie и аналитика.</b> Сайт записи не использует cookie и счётчики аналитики.</p>"""
+    return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — {salon}</title><style>body{{margin:0;background:#0f0f10;color:#ece9e4;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif}}
+main{{max-width:760px;margin:0 auto;padding:28px 16px 60px}} h1{{font-size:24px;line-height:1.3}} a{{color:#c8b08a}} mark{{background:#5a1d1d;color:#fff;padding:0 4px}}
+p{{margin:0 0 14px}}</style></head><body><main><h1>{title}</h1>{body}
+<p style="color:#8e8a86;font-size:14px;margin-top:28px">Салон «{salon}», {esc(cfg['SALON_ADDRESS'])}. <a href="/">Вернуться к записи</a></p></main></body></html>"""
+
+
+def purge_loop():
+    while True:
+        try:
+            keep = int(cfg.get("DATA_KEEP_DAYS") or 0)
+            if keep > 0:
+                since = (datetime.now(timezone.utc) - timedelta(days=keep)).isoformat()
+                with db_lock, db() as con:
+                    ids = [r[0] for r in con.execute("SELECT id FROM leads WHERE created_at < ?", (since,))]
+                    con.execute("DELETE FROM leads WHERE created_at < ?", (since,))
+                    con.executemany("DELETE FROM msgmap WHERE lead_id=?", [(i,) for i in ids])
+                if ids:
+                    log("Удалено старых заявок (срок хранения):", len(ids))
+        except Exception as e:
+            log("Ошибка очистки:", e)
+        time.sleep(6 * 3600)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "EuphoriaLeads/1.0"
 
@@ -702,6 +767,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self.key_ok(qs):
                 return self.send(403, "Нужен ?key=ПАРОЛЬ")
             return self.send(200, csv_bytes(all_leads(days)), "text/csv; charset=utf-8", {"Content-Disposition": 'attachment; filename="euphoria-zayavki.csv"'})
+        if u.path in ("/consent", "/privacy"):
+            return self.send(200, legal_html(u.path[1:]), "text/html; charset=utf-8")
         if u.path == "/health":
             return self.send(200, "ok")
         self.send(404, "Не найдено")
@@ -710,6 +777,8 @@ class Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlparse(self.path).path != "/api/lead":
             return self.send(404, "Не найдено")
         ip = self.client_address[0]
+        if ip in ("127.0.0.1", "::1") and self.headers.get("X-Forwarded-For"):  # за Caddy на VPS — настоящий адрес клиента
+            ip = self.headers["X-Forwarded-For"].split(",")[-1].strip()
         now = time.time()
         rate[ip] = [t for t in rate.get(ip, []) if now - t < 60] + [now]
         if len(rate[ip]) > 5:
@@ -733,6 +802,9 @@ def main():
         threading.Thread(target=poll_loop, daemon=True).start()
     else:
         log("BOT_TOKEN пуст: заявки сохраняются, но в Telegram не отправляются.")
+    threading.Thread(target=purge_loop, daemon=True).start()
+    if not cfg.get("OPERATOR_NAME"):
+        log("Внимание: в config.json не заполнены данные оператора (OPERATOR_…) — они нужны для страниц /consent и /privacy.")
     if cfg.get("UPDATE_REPO") and cfg.get("UPDATE_AUTO"):
         threading.Thread(target=update_loop, daemon=True).start()
     if cfg.get("BOT_TOKEN"):

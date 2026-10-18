@@ -1,9 +1,9 @@
 {
-  "version": "4519c187bae8",
-  "built": "18.10.2026 23:20",
-  "note": "Новые настройки сами дописываются в config.json",
+  "version": "4e9829fe60c9",
+  "built": "18.10.2026 23:35",
+  "note": "Согласие на обработку данных в форме, страницы /consent и /privacy, автоудаление старых заявок; истории пересобраны под кнопки Яндекса; установка на VPS одной командой",
   "files": {
-    "server.py": "8bb6e7007f6dcb5befe3eef8f30908adc898ded2a0436136564bb9d5bfca1d1f",
-    "public/index.html": "ce457336ded6fd6e72db67634e4c63d289b15ad840ad80fc10f0cf4ae52fd858"
+    "server.py": "81b23753c44866ecf83a4b26fc490dde97190d173657d19133533d7ff819115c",
+    "public/index.html": "a99eebb6f6e3488465f4ecabbf5fa20876f423ceb38aad38f87d7deae219bf46"
   }
 }
