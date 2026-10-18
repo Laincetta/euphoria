@@ -531,7 +531,7 @@ def dialogs_view(page=0):
     if (page + 1) * PAGE < len(chats):
         nav.append({"text": "Ещё →", "callback_data": f"dl:list:{page + 1}"})
     kb += [nav] if nav else []
-    kb.append([{"text": "Обновить", "callback_data": f"dl:list:{page}"}])
+    kb.append([{"text": "Обновить", "callback_data": f"dl:list:{page}"}, {"text": "Закрыть", "callback_data": "x:close"}])
     return "\n".join(out)[:4000], {"inline_keyboard": kb}
 
 
@@ -559,6 +559,7 @@ def dialog_view(chat):
     if waiting:
         kb.append([{"text": "Отметить как отвеченный", "callback_data": f"dl:done:{chat}"}])
     kb.append([{"text": "← Все диалоги", "callback_data": "dl:list:0"}, {"text": "Обновить", "callback_data": f"dl:open:{chat}"}])
+    kb.append([{"text": "Закрыть", "callback_data": "x:close"}])
     return text, {"inline_keyboard": kb}
 
 
@@ -774,11 +775,13 @@ def plural(n, one, few, many):
     return one if n % 10 == 1 and n != 11 else few if 2 <= n % 10 <= 4 and not 12 <= n <= 14 else many
 
 
+CLOSE_BTN = {"text": "Закрыть", "callback_data": "x:close"}
 PERIODS = {"today": "Сегодня", "tomorrow": "Завтра", "week": "Неделя", "all": "Все"}
 
 
 def period_keyboard(cur):
-    return {"inline_keyboard": [[{"text": ("• " if k == cur else "") + n, "callback_data": f"up:{k}"} for k, n in PERIODS.items()]]}
+    return {"inline_keyboard": [[{"text": ("• " if k == cur else "") + n, "callback_data": f"up:{k}"} for k, n in PERIODS.items()],
+                                [CLOSE_BTN]]}
 
 
 def upcoming_text(period="all"):
@@ -895,6 +898,12 @@ def handle_update(u):
     if q and str(q.get("data", "")).startswith("rp:"):  # админ: «Ответить» под сообщением клиента
         if str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
             ask_reply(q["data"][3:])
+        tg("answerCallbackQuery", {"callback_query_id": q["id"]})
+        return
+    if q and q.get("data") == "x:close":  # «Закрыть» — убрать сообщение-меню из чата
+        r = tg("deleteMessage", {"chat_id": q["message"]["chat"]["id"], "message_id": q["message"]["message_id"]})
+        if not r.get("ok"):  # Telegram не даёт удалять сообщения старше 48 часов — тогда просто сворачиваем
+            tg("editMessageText", {"chat_id": q["message"]["chat"]["id"], "message_id": q["message"]["message_id"], "text": "Закрыто."})
         tg("answerCallbackQuery", {"callback_query_id": q["id"]})
         return
     if q and str(q.get("data", "")).startswith(("dl:", "qa:")):  # админ: диалоги с клиентами
