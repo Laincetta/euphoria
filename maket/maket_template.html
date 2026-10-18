@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Эйфория в Картах — макет</title>
+<style>
+:root{--ink:#1d1d1f;--muted:#7b7b80;--faint:#a5a5aa;--line:#ececee;--bg:#fff;--soft:#f3f3f5;--accent:#2f6fec;--green:#2e9e4f;--gold:#c8a46b;--page:#e8e6e1}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:var(--page);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:48px;padding:24px 16px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.side{width:300px;font-size:14px;line-height:1.5;color:#3a3a3d}
+.side h1{font-size:22px;line-height:1.25;margin-bottom:10px;color:var(--ink)}
+.side p{margin-bottom:10px}.side ul{margin:0 0 12px 18px}.side li{margin-bottom:6px}
+.side .tag{display:inline-block;background:#fff;border-radius:8px;padding:2px 8px;font-size:12px;color:var(--muted);margin-bottom:12px}
+.phone{position:relative;width:390px;height:844px;border-radius:46px;overflow:hidden;background:#dfe6dc;box-shadow:0 0 0 11px #111,0 30px 70px rgba(0,0,0,.28);flex:none}
+@media (max-width:900px){body{padding:0;gap:0}.side{display:none}.phone{width:100vw;height:100dvh;border-radius:0;box-shadow:none}}
+/* карта */
+.map{position:absolute;inset:0}
+.map svg{width:100%;height:100%;display:block}
+.search{position:absolute;top:54px;left:14px;right:14px;height:46px;background:#fff;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.12);display:flex;align-items:center;gap:10px;padding:0 14px;font-size:15px;z-index:3}
+.search i{width:16px;height:16px;border:2px solid #999;border-radius:50%;position:relative;flex:none}
+.search i:after{content:"";position:absolute;width:7px;height:2px;background:#999;right:-6px;bottom:-3px;transform:rotate(45deg)}
+.status{position:absolute;top:0;left:0;right:0;height:44px;display:flex;justify-content:space-between;align-items:center;padding:0 30px;font-size:15px;font-weight:600;z-index:6;pointer-events:none}
+/* шторка */
+.sheet{position:absolute;left:0;right:0;bottom:0;top:46%;background:var(--bg);border-radius:20px 20px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.12);display:flex;flex-direction:column;transition:top .32s cubic-bezier(.2,.8,.2,1);z-index:4}
+.sheet.full{top:44px}
+.grab{padding:8px 0 4px;display:flex;justify-content:center;cursor:grab;flex:none}
+.grab span{width:38px;height:5px;border-radius:3px;background:#d4d4d8}
+.scroll{flex:1;overflow-y:auto;overscroll-behavior:contain}
+.scroll::-webkit-scrollbar{display:none}
+.pad{padding:0 16px}
+.gallery{display:flex;gap:6px;overflow-x:auto;padding:4px 16px 12px;scroll-snap-type:x mandatory}
+.gallery::-webkit-scrollbar{display:none}
+.gallery img,.gallery .ph{height:120px;border-radius:12px;flex:none;object-fit:cover;scroll-snap-align:start;cursor:pointer}
+.gallery .ph{width:120px;background:var(--soft);display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;color:var(--faint);padding:8px}
+.head{display:flex;gap:12px;align-items:center}
+.logo{width:50px;height:50px;border-radius:50%;flex:none;object-fit:cover;border:1px solid var(--line)}
+h2{font-size:22px;line-height:1.15}
+.cat{color:var(--muted);font-size:14px;margin-top:2px}
+.rate{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:14px}
+.stars{color:#f5a623;letter-spacing:1px}.stars b{color:#ddd;font-weight:400}
+.open{font-size:14px;margin-top:6px}.open b{font-weight:600}.open .g{color:var(--green)}.open .r{color:#d14343}
+.acts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}
+.acts button{height:58px;border-radius:14px;background:var(--soft);font-size:12.5px;font-weight:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.acts button svg{width:20px;height:20px}
+.acts .pri{background:var(--accent);color:#fff}
+.promo{display:flex;gap:10px;align-items:center;background:#fff6e0;border-radius:14px;padding:10px 12px;font-size:13.5px;margin-bottom:12px;cursor:pointer}
+.promo b{background:#ffb300;border-radius:7px;padding:3px 8px;font-size:12px;flex:none}
+.stories{display:flex;gap:10px;overflow-x:auto;padding:2px 16px 14px}
+.stories::-webkit-scrollbar{display:none}
+.st{flex:none;width:80px;text-align:center;font-size:11.5px;cursor:pointer}
+.st .ring{width:80px;height:106px;border-radius:14px;padding:2px;background:linear-gradient(135deg,#c8a46b,#3a3a3a)}
+.st img{width:100%;height:100%;object-fit:cover;border-radius:12px;border:2px solid #fff;display:block}
+.st.seen .ring{background:#d4d4d8}
+.st span{display:block;margin-top:5px}
+.tabs{position:sticky;top:0;background:#fff;z-index:2;display:flex;gap:18px;padding:0 16px;border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{padding:12px 0 10px;font-size:14.5px;color:var(--muted);border-bottom:2px solid transparent}
+.tabs button.on{color:var(--ink);font-weight:600;border-color:var(--ink)}
+.tabs small{color:var(--faint);font-weight:400;margin-left:3px}
+.sec{padding:16px}
+.sec h3{font-size:18px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:baseline}
+.sec h3 button{font-size:13.5px;color:var(--accent);font-weight:500}
+.cards{display:flex;gap:10px;overflow-x:auto;margin:0 -16px;padding:0 16px 4px}
+.cards::-webkit-scrollbar{display:none}
+.card{flex:none;width:140px;cursor:pointer}
+.thumb{height:104px;border-radius:12px;background:linear-gradient(135deg,#2b2b2e,#5a5a5f);position:relative;overflow:hidden;display:flex;align-items:flex-end;padding:8px}
+.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:grayscale(1)}
+.thumb span{position:relative;font-size:10.5px;color:#fff;background:rgba(0,0,0,.45);border-radius:6px;padding:1px 6px}
+.card .n{font-size:13px;line-height:1.3;margin-top:6px;height:51px;overflow:hidden}
+.card .p{font-weight:700;font-size:14px;margin-top:2px}
+.desc{font-size:14.5px;line-height:1.5;color:#3a3a3d}
+.feat{display:flex;flex-wrap:wrap;gap:8px}
+.feat span{background:var(--soft);border-radius:18px;padding:7px 12px;font-size:13px}
+.rowi{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+.rowi small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+.rowi a{color:var(--accent);text-decoration:none}
+.chips{display:flex;gap:8px;overflow-x:auto;margin:0 -16px 6px;padding:0 16px}
+.chips::-webkit-scrollbar{display:none}
+.chips button{flex:none;border-radius:18px;background:var(--soft);padding:8px 13px;font-size:13.5px}
+.chips button.on{background:var(--ink);color:#fff}
+.find{width:100%;height:42px;border-radius:12px;border:0;background:var(--soft);padding:0 14px;font:inherit;font-size:15px;margin-bottom:12px;outline:none}
+.svc{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.svc .thumb{width:64px;height:64px;flex:none;border-radius:10px;padding:0}
+.svc .t{flex:1;min-width:0}
+.svc b{font-weight:500;font-size:14.5px;display:block;line-height:1.3}
+.svc small{color:var(--muted);font-size:12.5px;display:block;margin-top:3px}
+.svc .pr{font-weight:700;font-size:14.5px;white-space:nowrap}
+.pop{display:inline-block;font-size:10.5px;background:#fff1cc;color:#8a6200;border-radius:6px;padding:1px 6px;margin-top:4px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.grid img,.grid .ph{width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--faint);text-align:center;padding:4px;cursor:pointer}
+.big{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.big b{font-size:44px;line-height:1}
+.rev{background:var(--soft);border-radius:14px;padding:12px;margin-bottom:10px;font-size:14px;line-height:1.45}
+.rev .who{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:4px}
+.note{font-size:12.5px;color:var(--muted);background:#f7f7f8;border-radius:10px;padding:10px 12px;margin-bottom:12px}
+/* оверлеи */
+.ov{position:absolute;inset:0;z-index:10;display:none}
+.ov.on{display:block}
+.story{background:#000}
+.story img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.bars{position:absolute;top:50px;left:10px;right:10px;display:flex;gap:4px;z-index:2}
+.bars i{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.35);overflow:hidden}
+.bars i b{display:block;height:100%;width:0;background:#fff}
+.sthead{position:absolute;top:62px;left:12px;right:12px;display:flex;align-items:center;gap:8px;color:#fff;z-index:2;font-size:14px;font-weight:600}
+.sthead img{position:static;width:30px;height:30px;border-radius:50%}
+.sthead button{margin-left:auto;color:#fff;font-size:30px;line-height:1;width:40px;height:40px}
+.tapl,.tapr{position:absolute;top:110px;bottom:120px;z-index:1}.tapl{left:0;width:35%}.tapr{right:0;width:65%}
+.stcta{position:absolute;left:16px;right:16px;bottom:34px;height:54px;border-radius:14px;background:#fff;color:#111;font-weight:700;font-size:16px;z-index:2}
+.sheet2{background:rgba(0,0,0,.35)}
+.sheet2 .box{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:20px 20px 0 0;padding:8px 16px 28px;max-height:80%;overflow-y:auto}
+.sheet2 .thumb{height:180px;margin:6px 0 14px}
+.sheet2 h4{font-size:20px;line-height:1.25}
+.sheet2 .pp{font-size:20px;font-weight:700;margin:8px 0}
+.btn{width:100%;height:52px;border-radius:14px;background:var(--accent);color:#fff;font-weight:600;font-size:16px;margin-top:14px}
+.btn.ghost{background:var(--soft);color:var(--ink);margin-top:8px}
+.web{background:#fff;display:none;flex-direction:column}
+.web.on{display:flex}
+.webbar{flex:none;height:96px;padding:48px 12px 0;display:flex;align-items:center;gap:10px;background:#f6f6f7;border-bottom:1px solid var(--line);font-size:13px}
+.webbar button{font-size:15px;color:var(--accent);font-weight:500}
+.webbar .url{flex:1;background:#fff;border-radius:10px;height:34px;display:flex;align-items:center;justify-content:center;color:#555;gap:6px}
+.web iframe{flex:1;border:0;width:100%}
+.toast{position:absolute;left:50%;bottom:40px;transform:translateX(-50%) translateY(20px);background:rgba(30,30,32,.94);color:#fff;font-size:13.5px;padding:10px 14px;border-radius:12px;opacity:0;transition:.25s;z-index:20;width:max-content;max-width:330px;text-align:center;pointer-events:none}
+.toast.on{opacity:1;transform:translateX(-50%)}
+.mark{position:absolute;top:110px;right:12px;z-index:3;background:rgba(255,255,255,.92);border-radius:10px;padding:5px 9px;font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="side">
+  <span class="tag">Макет, не скриншот</span>
+  <h1>«Эйфория» в Яндекс Картах — как увидит клиент</h1>
+  <p>Можно всё трогать:</p>
+  <ul>
+    <li>потяните шторку вверх или нажмите на полоску;</li>
+    <li>истории — листаются тапом, внизу кнопка записи;</li>
+    <li>вкладка «Цены» — все 75 услуг, поиск и разделы, у каждой услуги — «Записаться»;</li>
+    <li>«Сайт» и кнопки записи открывают <b>нашу настоящую страницу</b> с корзиной (в демо-режиме: заявки никуда не уходят).</li>
+  </ul>
+  <p>Прайс, истории, логотип, описание и особенности — реальные файлы, которые загружаются в Яндекс Бизнес. Фото услуг появятся после фотосессии. Раскладку экрана Яндекс иногда меняет, поэтому это примерный вид.</p>
+</div>
+
+<div class="phone" id="phone">
+  <div class="status"><span id="clock">10:00</span><span>●●● ▮</span></div>
+  <div class="map" id="map"></div>
+  <div class="search"><i></i><span>Эйфория, Реутов</span></div>
+  <div class="mark">макет</div>
+
+  <div class="sheet" id="sheet">
+    <div class="grab" id="grab"><span></span></div>
+    <div class="scroll" id="scroll"></div>
+  </div>
+
+  <div class="ov story" id="story">
+    <div class="bars" id="bars"></div>
+    <img id="stimg" alt="">
+    <div class="sthead"><img id="stlogo" alt=""><span>Эйфория</span><button data-a="stclose" aria-label="Закрыть">×</button></div>
+    <div class="tapl" data-a="stprev"></div><div class="tapr" data-a="stnext"></div>
+    <button class="stcta" id="stcta" data-a="stcta">Записаться на сайте</button>
+  </div>
+
+  <div class="ov sheet2" id="item" data-a="itemclose"><div class="box" id="itembox"></div></div>
+
+  <div class="ov web" id="web">
+    <div class="webbar"><button data-a="webclose">Закрыть</button><div class="url">🔒 euphoria-reutov.ru</div><span style="width:52px"></span></div>
+    <iframe id="frame" title="Страница записи" srcdoc="__BOOKING__"></iframe>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const D = /*__DATA__*/;
+const S = D.salon, $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  .replace(/(\d) (?=\d{3})/g, '$1\u00a0').replace(/ ₽/g, '\u00a0₽'); // цены не разрываются переносом
+const st = { tab: 'overview', cat: 'all', q: '', story: -1, seen: new Set(), timer: null };
+const IC = {
+  route: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4.5 20.3l.7.7L12 18l6.8 3 .7-.7z"/></svg>',
+  call: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>',
+  site: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>'
+};
+
+/* ---------- карта (условная схема района) ---------- */
+$('map').innerHTML = `<svg viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
+  <rect width="390" height="844" fill="#eceee6"/>
+  <path d="M-20 300 C 80 260, 160 330, 260 280 S 420 240, 430 260 L430 340 C 330 330, 260 380, 150 360 S 0 380,-20 380Z" fill="#cfe3c4"/>
+  <rect x="230" y="120" width="140" height="110" rx="10" fill="#d6e9cc"/>
+  <g stroke="#fff" stroke-linecap="round">
+    <path d="M-10 210 L400 170" stroke-width="16"/><path d="M60 -10 L120 420" stroke-width="12"/><path d="M-10 430 L400 470" stroke-width="18"/>
+    <path d="M300 -10 L250 440" stroke-width="10"/><path d="M-10 90 L400 120" stroke-width="8"/><path d="M170 180 L200 460" stroke-width="7"/>
+  </g>
+  <g fill="#e0ddd5"><rect x="80" y="230" width="70" height="40" rx="4"/><rect x="190" y="235" width="40" height="60" rx="4"/><rect x="20" y="120" width="60" height="50" rx="4"/><rect x="140" y="110" width="80" height="45" rx="4"/></g>
+  <text x="210" y="160" font-size="11" fill="#8a8a8a" transform="rotate(-6 210 160)">Парковая улица</text>
+  <text x="250" y="182" font-size="10" fill="#6f8f62">Парк</text>
+  <g transform="translate(176 222)"><circle r="22" fill="rgba(47,111,236,.15)"/><path d="M0 -26 C 14 -26 18 -14 18 -8 C 18 4 0 18 0 18 C 0 18 -18 4 -18 -8 C -18 -14 -14 -26 0 -26Z" fill="#e5484d"/><circle cy="-9" r="6" fill="#fff"/></g>
+  <rect x="140" y="248" width="76" height="22" rx="11" fill="#fff" stroke="#e5e5e5"/><text x="178" y="263" font-size="12" font-weight="600" text-anchor="middle" fill="#222">Эйфория</text>
+</svg>`;
+
+/* ---------- данные ---------- */
+const SV = D.services, CATS = [...new Set(SV.map((s) => s.cat))];
+const photo = (s) => s && s.photo ? 'https://images.unsplash.com/photo-' + s.photo + '?auto=format&fit=crop&w=300&q=60' : '';
+const thumb = (s, label) => '<div class="thumb">' + (photo(s) ? '<img loading="lazy" src="' + photo(s) + '" onerror="this.remove()" alt="">' : '') + '<span>' + esc(label || 'фото салона') + '</span></div>';
+const nowOpen = () => { const h = new Date().getHours(); return h >= S.open && h < S.close; };
+const stars = (r) => { const n = Math.floor(parseFloat(String(r).replace(',', '.'))); return '★'.repeat(n) + '<b>' + '★'.repeat(5 - n) + '</b>'; };
+
+function render() {
+  const sc = $('scroll'), keep = sc.scrollTop;
+  let h = '<div class="gallery"><img src="' + D.imgs.cover + '" data-a="photos" alt="Обложка">' +
+    D.imgs.stories.map((src, i) => '<img src="' + src + '" data-a="story" data-v="' + i + '" alt="">').join('') +
+    '<div class="ph" data-a="photos">+' + S.photosCount + ' фото<br>после фотосессии</div></div>';
+  h += '<div class="pad"><div class="head"><img class="logo" src="' + D.imgs.logo + '" alt=""><div><h2>' + esc(S.name) + '</h2><div class="cat">Салон красоты · Лазерная эпиляция</div></div></div>' +
+    '<div class="rate"><b>' + esc(S.rating) + '</b><span class="stars">' + stars(S.rating) + '</span><span style="color:var(--muted)">' + esc(S.ratingsCount) + ' · ' + S.reviewsCount + ' отзывов</span></div>' +
+    '<div class="open">' + (nowOpen() ? '<b class="g">Открыто</b> до ' + S.close + ':00' : '<b class="r">Закрыто</b> до ' + S.open + ':00') + ' · ' + esc(S.addressShort) + '</div>' +
+    '<div class="acts"><button class="pri" data-a="route">' + IC.route + 'Маршрут</button><button data-a="call">' + IC.call + 'Позвонить</button>' +
+    '<button data-a="site">' + IC.site + 'Сайт</button><button data-a="share">' + IC.share + 'Поделиться</button></div>' +
+    '<div class="promo" data-a="promo"><b>Акция</b><span>' + esc(D.offer.promoLine) + '</span></div></div>';
+  h += '<div class="stories">' + D.stories.map((s, i) => '<div class="st' + (st.seen.has(i) ? ' seen' : '') + '" data-a="story" data-v="' + i + '"><div class="ring"><img src="' + D.imgs.stories[i] + '" alt=""></div><span>' + esc(s.caption) + '</span></div>').join('') + '</div>';
+  const tabs = [['overview', 'Обзор'], ['prices', 'Цены', SV.length], ['photos', 'Фото', S.photosCount], ['reviews', 'Отзывы', S.reviewsCount], ['features', 'Особенности']];
+  h += '<div class="tabs">' + tabs.map(([k, n, c]) => '<button class="' + (st.tab === k ? 'on' : '') + '" data-a="tab" data-v="' + k + '">' + n + (c ? '<small>' + c + '</small>' : '') + '</button>').join('') + '</div>';
+  h += ({ overview, prices, photos, reviews, features }[st.tab])();
+  sc.innerHTML = h + '<div style="height:40px"></div>';
+  sc.scrollTop = keep;
+}
+function overview() {
+  const pop = SV.filter((s) => s.popular).slice(0, 10);
+  return '<div class="sec"><h3>Товары и услуги <button data-a="tab" data-v="prices">Все ' + SV.length + '</button></h3><div class="cards">' +
+    pop.map((s) => '<div class="card" data-a="item" data-v="' + s.id + '">' + thumb(s, s.cat) + '<div class="n">' + esc(s.name) + '</div><div class="p">' + esc(s.priceText) + '</div></div>').join('') + '</div></div>' +
+    '<div class="sec"><h3>О салоне</h3><p class="desc">' + esc(S.description) + '</p></div>' +
+    '<div class="sec"><h3>Контакты</h3>' +
+    '<div class="rowi"><div>' + esc(S.address) + '<small>' + esc(S.floor) + ' · м. ' + esc(S.metro.name) + ', ' + esc(S.metro.dist) + '</small></div></div>' +
+    '<div class="rowi"><div>Ежедневно ' + S.open + ':00–' + S.close + ':00<small>' + (nowOpen() ? 'Сейчас открыто' : 'Сейчас закрыто') + '</small></div></div>' +
+    '<div class="rowi"><a href="tel:' + S.phone.replace(/[^\d+]/g, '') + '">' + esc(S.phone) + '</a></div>' +
+    '<div class="rowi"><a href="#" data-a="site">euphoria-reutov.ru</a><small style="margin:0">запись онлайн</small></div></div>' +
+    '<div class="sec"><h3>Особенности</h3><div class="feat">' + D.features.map(([k]) => '<span>' + esc(k) + '</span>').join('') + '</div></div>';
+}
+function prices() {
+  const q = st.q.trim().toLowerCase();
+  let list = SV.filter((s) => (st.cat === 'all' || s.cat === st.cat) && (!q || s.name.toLowerCase().includes(q)));
+  if (st.cat === 'all' && !q) list = [...list.filter((s) => s.popular), ...list.filter((s) => !s.popular)];
+  return '<div class="sec"><input class="find" id="find" placeholder="Поиск по услугам" value="' + esc(st.q) + '">' +
+    '<div class="chips">' + [['all', 'Все']].concat(CATS.map((c) => [c, c])).map(([k, n]) => '<button class="' + (st.cat === k ? 'on' : '') + '" data-a="cat" data-v="' + esc(k) + '">' + esc(n) + '</button>').join('') + '</div>' +
+    (list.length ? list.map((s) => '<div class="svc" data-a="item" data-v="' + s.id + '">' + thumb(s, '') + '<div class="t"><b>' + esc(s.name) + '</b><small>' + esc(s.cat) + '</small>' + (s.popular ? '<span class="pop">популярное</span>' : '') + '</div><div class="pr">' + esc(s.priceText) + '</div></div>').join('')
+      : '<p class="desc" style="padding:20px 0">Ничего не нашлось</p>') + '</div>';
+}
+function photos() {
+  const ph = Array.from({ length: 9 }, () => '<div class="ph">фото салона после фотосессии</div>').join('');
+  return '<div class="sec"><div class="grid"><img src="' + D.imgs.cover + '" alt=""><img src="' + D.imgs.logo + '" alt="">' +
+    D.imgs.stories.map((s, i) => '<img src="' + s + '" data-a="story" data-v="' + i + '" alt="">').join('') + ph + '</div></div>';
+}
+function reviews() {
+  return '<div class="sec"><div class="big"><b>' + esc(S.rating) + '</b><div><div class="stars" style="font-size:18px">' + stars(S.rating) + '</div><div style="color:var(--muted);font-size:13px">' + esc(S.ratingsCount) + ' · ' + S.reviewsCount + ' отзывов</div></div></div>' +
+    '<div class="note">Здесь Яндекс показывает настоящие отзывы клиентов. Ниже — примеры, как они выглядят.</div>' +
+    D.reviews.map((r) => '<div class="rev"><div class="who"><b style="color:var(--ink)">' + esc(r.name) + '</b><span>' + esc(r.date) + ' · пример</span></div><div class="stars">' + '★'.repeat(r.stars) + '</div>' + esc(r.text) + '</div>').join('') + '</div>';
+}
+function features() {
+  return '<div class="sec">' + D.features.map(([k, v]) => '<div class="rowi"><span>' + esc(k) + '</span><span style="color:var(--muted)">' + esc(v) + '</span></div>').join('') + '</div>';
+}
+
+/* ---------- истории ---------- */
+function openStory(i) {
+  if (i < 0) i = 0;
+  if (i >= D.stories.length) return closeStory();
+  st.story = i; st.seen.add(i);
+  $('story').classList.add('on'); $('stimg').src = D.imgs.stories[i]; $('stlogo').src = D.imgs.logo;
+  $('stcta').textContent = D.stories[i].cta || 'Записаться на сайте';
+  $('bars').innerHTML = D.stories.map((_, k) => '<i><b style="width:' + (k < i ? 100 : 0) + '%"></b></i>').join('');
+  const bar = $('bars').children[i].firstChild; bar.style.transition = 'none'; bar.style.width = '0';
+  requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transition = 'width 5s linear'; bar.style.width = '100%'; }));
+  clearTimeout(st.timer); st.timer = setTimeout(() => openStory(st.story + 1), 5000);
+}
+function closeStory() { clearTimeout(st.timer); st.story = -1; $('story').classList.remove('on'); render(); }
+
+/* ---------- услуга и страница записи ---------- */
+function openItem(id) {
+  const s = SV.find((x) => x.id === id); if (!s) return;
+  $('itembox').innerHTML = '<div class="grab"><span></span></div>' + thumb(s, s.cat) + '<h4>' + esc(s.name) + '</h4><div class="pp">' + esc(s.priceText) + '</div>' +
+    '<p class="desc">' + esc(s.description) + '</p><button class="btn" data-a="book" data-v="' + s.id + '">Записаться</button><button class="btn ghost" data-a="itemclose">Закрыть</button>';
+  $('item').classList.add('on');
+}
+function openSite(serviceId) {
+  $('item').classList.remove('on'); clearTimeout(st.timer); $('story').classList.remove('on');
+  $('web').classList.add('on');
+  const go = () => { try { const w = $('frame').contentWindow; w.eval(serviceId ? "if(!st.cart.includes('" + serviceId + "'))st.cart.push('" + serviceId + "');renderMain&&renderMain(true);openBooking(true)" : 'window.scrollTo(0,0)'); } catch (e) { } };
+  if ($('frame').dataset.ready) go(); else st.pending = go;
+}
+$('frame').addEventListener('load', () => { $('frame').dataset.ready = 1; if (st.pending) { st.pending(); st.pending = null; } });
+function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2600); }
+
+/* ---------- события ---------- */
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-a]'); if (!el) return;
+  const a = el.dataset.a, v = el.dataset.v;
+  if (a === 'itemclose' && el.id === 'item' && e.target !== el) return;
+  switch (a) {
+    case 'tab': st.tab = v; render(); $('sheet').classList.add('full'); setTimeout(() => { const t = document.querySelector('.tabs'); $('scroll').scrollTop = t.offsetTop; }, 50); break;
+    case 'cat': st.cat = v; render(); break;
+    case 'story': openStory(+v); break;
+    case 'stnext': openStory(st.story + 1); break;
+    case 'stprev': openStory(st.story - 1); break;
+    case 'stclose': closeStory(); break;
+    case 'stcta': openSite(D.stories[st.story] && D.stories[st.story].serviceId); break;
+    case 'item': openItem(v); break;
+    case 'itemclose': $('item').classList.remove('on'); break;
+    case 'book': openSite(v); break;
+    case 'site': e.preventDefault(); openSite(); break;
+    case 'webclose': $('web').classList.remove('on'); break;
+    case 'route': toast('Здесь Карты построят маршрут до салона'); break;
+    case 'call': location.href = 'tel:' + S.phone.replace(/[^\d+]/g, ''); toast('Звонок: ' + S.phone); break;
+    case 'share': toast('Ссылка на карточку скопирована'); break;
+    case 'promo': toast('Строка «Акция» показывается при платном продвижении'); break;
+    case 'photos': st.tab = 'photos'; render(); $('sheet').classList.add('full'); break;
+  }
+});
+document.addEventListener('input', (e) => { if (e.target.id === 'find') { st.q = e.target.value; const pos = e.target.selectionStart; render(); const f = $('find'); f.focus(); f.setSelectionRange(pos, pos); } });
+$('grab').addEventListener('click', () => $('sheet').classList.toggle('full'));
+let y0 = null;
+$('grab').addEventListener('pointerdown', (e) => { y0 = e.clientY; });
+window.addEventListener('pointerup', (e) => { if (y0 === null) return; const dy = e.clientY - y0; y0 = null; if (dy < -30) $('sheet').classList.add('full'); else if (dy > 30) $('sheet').classList.remove('full'); });
+$('scroll').addEventListener('scroll', () => { if ($('scroll').scrollTop > 40) $('sheet').classList.add('full'); }, { passive: true });
+document.addEventListener('keydown', (e) => { if (st.story >= 0) { if (e.key === 'ArrowRight') openStory(st.story + 1); if (e.key === 'ArrowLeft') openStory(st.story - 1); if (e.key === 'Escape') closeStory(); } });
+const tick = () => { const d = new Date(); $('clock').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); };
+tick(); setInterval(tick, 30000);
+render();
+</script>
+</body>
+</html>
