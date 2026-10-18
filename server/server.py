@@ -1007,8 +1007,11 @@ def handle_update(u):
         if l and st == "cancelled" and prev and prev["status"] == "confirmed" and l["appt_at"]:
             to_client(l, f"Запись в салон «{cfg['SALON_NAME']}» на {fmt_appt(l['appt_at'])} отменена. "
                          "Если захотите выбрать другое время — напишите сюда.", menu_kb())
-        if l and st == "came" and prev and prev["status"] != "came" and cfg.get("REVIEW_URL"):
-            to_client(l, f"Спасибо, что были у нас! Будем благодарны за отзыв — это пара минут: {cfg['REVIEW_URL']}")
+        if l and st == "came" and prev and prev["status"] != "came":
+            ok = to_client(l, f"Спасибо, что были в салоне «{cfg['SALON_NAME']}»! Нам очень важно ваше мнение — "
+                              "оставьте, пожалуйста, отзыв в Яндекс Картах, это пара минут.",
+                           {"inline_keyboard": [[{"text": "Оставить отзыв", "url": reviews_url()}], [cb("Меню", "c:menu")]]})
+            log("Просьба об отзыве", l["name"], "→", "отправлена" if ok else "не отправлена (клиент не подключал бота)")
         return
     m = u.get("message") or {}
     text, chat = m.get("text", ""), (m.get("chat") or {}).get("id")
