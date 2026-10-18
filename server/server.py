@@ -92,7 +92,10 @@ def load_config():
         print(f"\nСоздан {CONFIG_PATH.name}. Впишите в него BOT_TOKEN (токен от @BotFather) и запустите сервер снова.\n"
               f"Пароль для отчёта уже придуман: {c['REPORT_KEY']} (можно поменять).\n")
         sys.exit(0)
-    cfg = dict(DEFAULT_CONFIG, **json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+    saved = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    cfg = dict(DEFAULT_CONFIG, **saved)
+    if set(DEFAULT_CONFIG) - set(saved):  # после обновления дописываем новые настройки в файл, чтобы их было видно
+        save_config()
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,}", cfg["REPORT_KEY"] or ""):
         sys.exit("REPORT_KEY в config.json: минимум 6 символов, только латиница, цифры, _ и -")
 
