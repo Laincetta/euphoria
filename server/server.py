@@ -249,6 +249,7 @@ def handle_update(u):
             save_config()
             tg("sendMessage", {"chat_id": chat, "text": "Готово: заявки с сайта теперь будут приходить в этот чат.\n/report — сводка по заявкам."})
             log("Администратор подключён, chat_id", chat)
+            threading.Thread(target=resend_pending, daemon=True).start()
         else:
             tg("sendMessage", {"chat_id": chat, "text": "Неверный пароль. Отправьте: /admin ПАРОЛЬ (REPORT_KEY из config.json)."})
     elif text.startswith("/start"):
@@ -272,7 +273,12 @@ def poll_loop():
     while True:
         r = tg("getUpdates", {"offset": tg_offset, "timeout": 25, "allowed_updates": ["message", "callback_query"]}, timeout=35)
         if not r.get("ok"):
-            time.sleep(5)
+            d = str(r.get("description"))
+            if "Conflict" in d:
+                log("Бот уже запущен в другом месте (другое окно сервера или другой компьютер). Оставьте один сервер.")
+                time.sleep(30)
+            else:
+                time.sleep(5)
             continue
         for u in r["result"]:
             tg_offset = u["update_id"] + 1
@@ -377,15 +383,43 @@ def save_lead(lead):
     with db_lock, db() as con:
         con.execute("INSERT INTO leads(id,created_at,name,phone,services,total,total_from,day,win,contact,handle,comment) "
                     "VALUES(:id,:created_at,:name,:phone,:services,:total,:total_from,:day,:win,:contact,:handle,:comment)", row)
-    l = get_lead(i)
+    ok = send_lead(get_lead(i))
+    return i, ok
+
+
+def send_lead(l):
+    """Отправить заявку администратору. Не получилось — она остаётся в базе и уйдёт позже (resend_loop)."""
     sent = {"ok": False, "description": "CHAT_ID не задан: администратор должен отправить боту /admin ПАРОЛЬ"}
     if cfg["CHAT_ID"]:
-        sent = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": lead_text(l), "parse_mode": "HTML", "reply_markup": keyboard(i)})
+        sent = tg("sendMessage", {"chat_id": cfg["CHAT_ID"], "text": lead_text(l), "parse_mode": "HTML", "reply_markup": keyboard(l["id"])})
     if sent.get("ok"):
         with db_lock, db() as con:
-            con.execute("UPDATE leads SET message_id=? WHERE id=?", (sent["result"]["message_id"], i))
-    log("Заявка", i, lead["name"], "· Telegram:", "отправлено" if sent.get("ok") else sent.get("description"))
-    return i, sent.get("ok")
+            con.execute("UPDATE leads SET message_id=? WHERE id=?", (sent["result"]["message_id"], l["id"]))
+    log("Заявка", l["id"], l["name"], "· Telegram:", "отправлено" if sent.get("ok") else "НЕ отправлено — " + str(sent.get("description")) + " (повторю позже)")
+    return bool(sent.get("ok"))
+
+
+resend_lock = threading.Lock()
+
+
+def resend_pending():
+    if not (cfg.get("CHAT_ID") and cfg.get("BOT_TOKEN")) or not resend_lock.acquire(blocking=False):
+        return
+    try:
+        since = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        with db_lock, db() as con:
+            rows = con.execute("SELECT * FROM leads WHERE message_id IS NULL AND created_at >= ? ORDER BY created_at", (since,)).fetchall()
+        for l in rows:
+            if not send_lead(l):
+                break
+    finally:
+        resend_lock.release()
+
+
+def resend_loop():
+    while True:
+        time.sleep(60)
+        resend_pending()
 
 
 # ---------- веб ----------
@@ -492,7 +526,17 @@ def main():
         log("BOT_TOKEN пуст: заявки сохраняются, но в Telegram не отправляются.")
     if cfg.get("UPDATE_REPO") and cfg.get("UPDATE_AUTO"):
         threading.Thread(target=update_loop, daemon=True).start()
-    srv = ThreadingHTTPServer((cfg["HOST"], int(cfg["PORT"])), Handler)
+    if cfg.get("BOT_TOKEN"):
+        threading.Thread(target=resend_loop, daemon=True).start()
+    ThreadingHTTPServer.allow_reuse_address = os.name != "nt"  # на Windows иначе можно случайно запустить два сервера на одном порту
+    for attempt in range(6):  # после перезапуска порт может освободиться не сразу
+        try:
+            srv = ThreadingHTTPServer((cfg["HOST"], int(cfg["PORT"])), Handler)
+            break
+        except OSError:
+            time.sleep(2)
+    else:
+        sys.exit(f"Порт {cfg['PORT']} занят: сервер уже запущен в другом окне. Закройте лишнее окно и запустите снова.")
     port = int(cfg["PORT"])
     log("Обновления:", (cfg["UPDATE_REPO"] + (" · автоматически" if cfg.get("UPDATE_AUTO") else " · по команде /update")) if cfg.get("UPDATE_REPO") else "выключены")
     log(f"Сервер запущен: http://localhost:{port}/  ·  заявки: http://localhost:{port}/admin?key={cfg['REPORT_KEY']}")
