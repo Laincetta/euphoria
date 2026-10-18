@@ -1,9 +1,9 @@
 {
-  "version": "65fcd62b0b38",
-  "built": "19.10.2026 01:45",
-  "note": "В «Записях» кнопки «Подтвердить и назначить время» для заявок без времени",
+  "version": "6a43dd1077ea",
+  "built": "19.10.2026 01:48",
+  "note": "Кнопка «Ответить» у клиента под сообщением администратора",
   "files": {
-    "server.py": "b5dd1bb98b07cd06432a0aa6ca0fb1bb0382de8d598757a43e73abd0a4da427b",
+    "server.py": "b89b8d6907c84445698d41b8c015109fa7c8b5e87a6c6a8a2fced964104bbcf7",
     "public/index.html": "173c3921d60d996a0a40bdf55268cc9984cbafd7f4a07ab5e8531e50082a06d3"
   }
 }

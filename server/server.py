@@ -507,7 +507,7 @@ def send_answer(target, text):
         log("Ответ админа: у клиента нет чата с ботом")
         return False, name
     r = tg("sendMessage", {"chat_id": chat, "text": f"Администратор салона «{cfg['SALON_NAME']}»:\n{text}",
-                           "reply_markup": {"inline_keyboard": [[cb("Задать вопрос администратору", "c:ask")], [cb("Меню", "c:menu")]]}})
+                           "reply_markup": {"inline_keyboard": [[cb("Ответить", "c:reply"), cb("Меню", "c:menu")]]}})
     if r.get("ok"):
         with db_lock, db() as con:
             con.execute("INSERT INTO messages(at,chat,lead_id,name,phone,dir,text,handled) VALUES(?,?,NULL,?,NULL,'out',?,1)",
@@ -620,9 +620,11 @@ def client_callback(q):
     if act == "menu":
         ans()
         return client_hello(chat)
-    if act == "ask":
+    if act in ("ask", "reply"):  # поле ввода открывается сразу, следующий текст уйдёт администратору
         ans()
-        return tg("sendMessage", {"chat_id": chat, "text": "Напишите ваш вопрос одним сообщением — администратор ответит здесь."})
+        return tg("sendMessage", {"chat_id": chat, "text": "Напишите ваш вопрос одним сообщением — администратор ответит здесь."
+                                  if act == "ask" else "Напишите ответ администратору:",
+                                  "reply_markup": {"force_reply": True, "input_field_placeholder": "Сообщение администратору"}})
     l = get_lead(lid) if lid else None
     if not l or l["client_chat"] != str(chat):
         return ans("Запись не найдена")
