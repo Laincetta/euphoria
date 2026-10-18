@@ -327,7 +327,8 @@ def set_appt(l, when, admin_chat):
     sent = to_client(l, f"Вы записаны в салон «{cfg['SALON_NAME']}»\n\n{fmt_appt(l['appt_at'])}\n{services_line(l)}\n\n"
                         f"Адрес: {cfg['SALON_ADDRESS']}\nТелефон: {salon_phone()}\n\nНапомним за сутки и за 2 часа до визита.",
                      appt_kb(l))
-    tg("sendMessage", {"chat_id": admin_chat, "text": f"Готово: {l['name']} — {fmt_appt(l['appt_at'])}. " + (
+    tg("sendMessage", {"chat_id": admin_chat, "reply_markup": {"inline_keyboard": [[{"text": "Открыть записи", "callback_data": "up:all"}]]},
+                       "text": f"Готово: {l['name']} — {fmt_appt(l['appt_at'])}. " + (
         "Клиенту ушло подтверждение, напомним за сутки и за 2 часа." if sent else
         {"call": "Клиент выбрал звонок", "max": "Клиент выбрал MAX"}.get(l["contact"], "Клиент не подключил бота") +
         " — подтвердите ему сами. За сутки до визита бот напомнит вам связаться с ним.")})
@@ -801,9 +802,18 @@ CLOSE_BTN = {"text": "Закрыть", "callback_data": "x:close"}
 PERIODS = {"today": "Сегодня", "tomorrow": "Завтра", "week": "Неделя", "all": "Все"}
 
 
+def pending_leads():
+    """Заявки без времени записи за последние 14 дней — их нужно подтвердить и назначить время."""
+    with db_lock, db() as con:
+        pend = con.execute("SELECT * FROM leads WHERE appt_at IS NULL AND status IN ('new','noanswer','confirmed') ORDER BY created_at").fetchall()
+    return [l for l in pend if datetime.fromisoformat(l["created_at"]) >= datetime.now(timezone.utc) - timedelta(days=14)]
+
+
 def period_keyboard(cur):
-    return {"inline_keyboard": [[{"text": ("• " if k == cur else "") + n, "callback_data": f"up:{k}"} for k, n in PERIODS.items()],
-                                [CLOSE_BTN]]}
+    kb = [[{"text": f"Подтвердить и назначить время: {i}. {l['name'][:18]}", "callback_data": f"tm:{l['id']}"}]
+          for i, l in enumerate(pending_leads()[:8], 1)]
+    return {"inline_keyboard": kb + [[{"text": ("• " if k == cur else "") + n, "callback_data": f"up:{k}"} for k, n in PERIODS.items()],
+                                     [CLOSE_BTN]]}
 
 
 def upcoming_text(period="all"):
@@ -832,16 +842,15 @@ def upcoming_text(period="all"):
             day = date_of(l)
             out += ["", f"<b>{day_title(datetime.fromisoformat(l['appt_at']).astimezone(MSK), today)}</b>", "—" * 12]
         out += ["", appt_block(l)]
-    pend = [l for l in pend if datetime.fromisoformat(l["created_at"]) >= datetime.now(timezone.utc) - timedelta(days=14)]
+    pend = pending_leads()
     if pend:
         out += ["", "", f"<b>Без времени записи ({len(pend)})</b>"]
-        for l in pend:
+        for n, l in enumerate(pend, 1):
             st = {"noanswer": "не дозвонились", "confirmed": "подтверждена, время не указано"}.get(l["status"], "новая, ждёт звонка")
             sv = json.loads(l["services"])
             first = (sv[0]["name"] if sv else "—") + (f" +{len(sv) - 1}" if len(sv) > 1 else "")
-            out.append(f"• <b>{esc(l['name'])}</b>, {nice_phone(l['phone'])} — {esc(first)} — хочет {esc(fmt_day(l['day']))} — {st}")
-        out += ["", "<i>Чтобы запись попала в расписание: нажмите «Подтвердил запись» под заявкой и ответьте боту временем, "
-                "например «20.10 14:30». Можно ответить временем прямо на сообщение с заявкой.</i>"]
+            out.append(f"{n}. <b>{esc(l['name'])}</b>, {nice_phone(l['phone'])} — {esc(first)} — хочет {esc(fmt_day(l['day']))} — {st}")
+        out += ["", "<i>Нажмите «Подтвердить и назначить время» ниже — бот спросит время, и запись появится в расписании.</i>"]
     text = "\n".join(out)
     return text if len(text) < 4000 else text[:3980] + "\n…"
 
@@ -921,6 +930,20 @@ def handle_update(u):
         if str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
             ask_reply(q["data"][3:])
         tg("answerCallbackQuery", {"callback_query_id": q["id"]})
+        return
+    if q and str(q.get("data", "")).startswith("tm:"):  # админ: подтвердить заявку из расписания и назначить время
+        if str(q["message"]["chat"]["id"]) == str(cfg["CHAT_ID"]):
+            l = get_lead(q["data"][3:])
+            if l:
+                if l["status"] in ("new", "noanswer"):
+                    with db_lock, db() as con:
+                        con.execute("UPDATE leads SET status='confirmed', status_at=?, status_by=? WHERE id=?",
+                                    (datetime.now(timezone.utc).isoformat(), q["from"].get("first_name", ""), l["id"]))
+                    l = get_lead(l["id"])
+                    refresh_admin_msg(l)
+                    log("Статус заявки", l["id"], "→ Подтверждена (из расписания)")
+                ask_time(l)
+        tg("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Напишите время записи"})
         return
     if q and q.get("data") == "x:close":  # «Закрыть» — убрать сообщение-меню из чата
         r = tg("deleteMessage", {"chat_id": q["message"]["chat"]["id"], "message_id": q["message"]["message_id"]})

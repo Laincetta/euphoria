@@ -1,9 +1,9 @@
 {
-  "version": "16b269eff40e",
-  "built": "19.10.2026 01:34",
-  "note": "Кнопки связи в заявке: «Написать от бота» и «Написать в Telegram» (по нику или номеру), «Открыть в MAX»",
+  "version": "65fcd62b0b38",
+  "built": "19.10.2026 01:45",
+  "note": "В «Записях» кнопки «Подтвердить и назначить время» для заявок без времени",
   "files": {
-    "server.py": "dcf96dfeeb7b3a7fa3f8e409e4fdbb1d8709665f2070dcea07421e6b2e4e91ec",
+    "server.py": "b5dd1bb98b07cd06432a0aa6ca0fb1bb0382de8d598757a43e73abd0a4da427b",
     "public/index.html": "173c3921d60d996a0a40bdf55268cc9984cbafd7f4a07ab5e8531e50082a06d3"
   }
 }
