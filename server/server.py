@@ -400,10 +400,7 @@ def set_commands():
     tg("setMyCommands", {"commands": [{"command": "start", "description": "О салоне"}]})
     if cfg.get("CHAT_ID"):
         tg("setMyCommands", {"scope": {"type": "chat", "chat_id": int(cfg["CHAT_ID"])},
-                             "commands": [{"command": "today", "description": "Записи на сегодня"},
-                                          {"command": "tomorrow", "description": "Записи на завтра"},
-                                          {"command": "week", "description": "Записи на неделю"},
-                                          {"command": "upcoming", "description": "Все предстоящие записи"},
+                             "commands": [{"command": "upcoming", "description": "Записи: сегодня, завтра, неделя, все"},
                                           {"command": "report", "description": "Сводка по заявкам"},
                                           {"command": "update", "description": "Обновить сервер"}]})
 
