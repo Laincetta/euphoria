@@ -200,6 +200,12 @@ table.svc input{width:64px;background:var(--surface2);border:1px solid transpare
 .tpl{background:var(--surface);border-radius:12px;padding:12px 14px;font-size:13px;display:flex;flex-direction:column;gap:4px}
 .tpl b{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:500}
 .hidden-sm{}
+.ap.hasnote::after{content:"";position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.ap .ntx{font-size:11px;color:var(--muted);white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
+textarea.inp{resize:vertical;min-height:0;line-height:1.4}
+.notebox{display:flex;gap:10px;align-items:flex-start;background:var(--surface2);border-radius:12px;padding:10px 12px;font-size:14px}
+.notebox span{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.hnote{color:var(--fg);opacity:.75}
 .svrow{align-items:center}
 .svrow .dot{width:8px;height:8px;border-radius:50%;background:var(--g);flex:0 0 auto;align-self:center}
 .mini{display:flex;flex-direction:column;gap:3px;font-size:10px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;width:72px;flex:0 0 auto}
@@ -344,11 +350,11 @@ A(0,"m1",840,"c9",["ls-2d"],{reply:"yes"});
 A(0,"m1",1050,"c10",["lz-legs"],{course:5,reply:"yes"});
 A(0,"m2",600,"c4",["mn-sh"],{reply:"yes"});
 A(0,"m2",720,"c3",["pd-gel"]);
-A(0,"m2",900,"c12",["mn-gel"],{reply:"yes"});
+A(0,"m2",900,"c12",["mn-gel"],{reply:"yes",comment:"Дизайн на двух ногтях, принесёт фото"});
 A(0,"m2",1080,"c5",["mn"]);
 A(0,"m3",660,"c6",["col-roots","hc-mid"],{reply:"yes"});
 A(0,"m3",870,"c13",["hc-men"]);
-A(0,"m3",960,"c14",["col-air"],{reply:"yes"});
+A(0,"m3",960,"c14",["col-air"],{reply:"yes",comment:"Тон 9.1, как в прошлый раз. Предупредить, что займёт 4 часа"});
 // завтра и дальше
 A(1,"m1",630,"c7",["lz-bik"],{course:2,reply:"yes"});
 A(1,"m1",780,"c8",["carbon"],{course:1,source:"yandex"});
@@ -464,9 +470,10 @@ function renderDay(){
       if(a.disc)tags.push(`<span class="tag acc">−${a.disc.pct}%</span>`);
       if(a.status==="booked"&&c.bot&&a.reply==="yes")tags.push(`<span class="tag ok">придёт</span>`);
       if(a.status==="noshow")tags.push(`<span class="tag warn">не пришёл</span>`);
-      return `<button class="ap ${a.status}${ui.flash===a.id?" flash":""}" style="top:${y(a.start)+1}px;height:${h}px;--g:var(--g-${grp(a)})" data-ap="${a.id}" aria-label="${esc(c.name)}, ${hm(a.start)}">
+      if(a.comment)tags.push(`<span class="tag">заметка</span>`);
+      return `<button class="ap ${a.status}${a.comment?" hasnote":""}${ui.flash===a.id?" flash":""}" style="top:${y(a.start)+1}px;height:${h}px;--g:var(--g-${grp(a)})" data-ap="${a.id}" aria-label="${esc(c.name)}, ${hm(a.start)}">
         <span class="n">${esc(tiny?c.name.split(" ")[0]+" · "+hm(a.start):c.name)}</span>${tiny?"":`<span class="t">${hm(a.start)}–${hm(a.start+a.dur)}</span>`}
-        ${short?"":`<span class="svn">${esc(svcNames(a))}</span>`}${h>=84&&tags.length?`<span class="tags">${tags.join("")}</span>`:""}</button>`}).join("");
+        ${short?"":`<span class="svn">${esc(svcNames(a))}</span>`}${a.comment&&h>=120?`<span class="ntx">${esc(a.comment)}</span>`:""}${h>=84&&tags.length?`<span class="tags">${tags.join("")}</span>`:""}</button>`}).join("");
     return `<div class="col" data-col="${m.id}" style="height:${y(CLOSE)}px">${blocks}</div>`});
   const nowY=ui.day===TODAY&&nowMin>=OPEN&&nowMin<=CLOSE?`<div class="nowline" style="top:${y(nowMin)}px"></div>`:"";
   $("#main").innerHTML=`<div class="view gut"><div class="colhead" style="grid-template-columns:repeat(${ms.length},minmax(0,1fr))">${ms.map(m=>`<div><b>${m.name}</b><span class="hidden-sm"> · ${m.role}</span></div>`).join("")}</div>
@@ -501,7 +508,7 @@ function openClient(cid){
      <dt>Потрачено</dt><dd>${rub(spent)} за ${hist.filter(a=>a.status==="came").length} ${plural(hist.filter(a=>a.status==="came").length,"визит","визита","визитов")}</dd>
      <dt>Дальше</dt><dd>${nb?`запись на ${dShort(nb.date)}, ${hm(nb.start)}`:r?`бот напомнит «пора обновить» ${dShort(r.due)}`:"—"}</dd></dl>
     ${c.note?`<div class="note">${esc(c.note)}</div>`:""}
-    <div class="fld"><span class="lbl">История визитов</span><div class="hist">${hist.map(a=>`<div><span>${dNum(a.date)}</span><span>${esc(svcNames(a))}${a.course?` · ${a.course}/${SV[a.svcs[0]].course.n}`:""}<br><small style="color:var(--muted)">${MS[a.master].name} · ${{came:"пришёл",booked:"записан",noshow:"не пришёл",cancelled:"отменено"}[a.status]||a.status}</small></span><span>${rub(a.price)}</span></div>`).join("")}</div></div>
+    <div class="fld"><span class="lbl">История визитов</span><div class="hist">${hist.map(a=>`<div><span>${dNum(a.date)}</span><span>${esc(svcNames(a))}${a.course?` · ${a.course}/${SV[a.svcs[0]].course.n}`:""}${a.comment?`<br><small class="hnote">${esc(a.comment)}</small>`:""}<br><small style="color:var(--muted)">${MS[a.master].name} · ${{came:"пришёл",booked:"записан",noshow:"не пришёл",cancelled:"отменено"}[a.status]||a.status}</small></span><span>${rub(a.price)}</span></div>`).join("")}</div></div>
     ${c.bot?"":`<div class="bot"><span class="l">Ссылка для напоминаний</span>Отправьте клиенту после звонка — бот подключится, и напоминания пойдут сами.<button class="btn sm" id="copyLink">Скопировать ссылку</button></div>`}
    </div>
    <div class="sh-foot"><button class="btn pri" id="again">Записать снова</button><button class="btn" id="callC">Позвонить</button></div>`);
@@ -554,8 +561,9 @@ function openAppt(id){
   openSheet(`<div class="sh-head"><h2>${esc(c.name)}</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
    <div class="sh-body">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="pill ${a.status}">${st}</span>${a.course?`<span class="tag acc">процедура ${a.course} из ${SV[a.svcs[0]].course.n}</span>`:""}${a.disc?`<span class="tag acc">скидка ${a.disc.pct}% ко дню рождения</span>`:""}</div>
-    <dl class="kv"><dt>Когда</dt><dd>${dLong(a.date)}, ${hm(a.start)}–${hm(a.start+a.dur)}</dd><dt>Мастер</dt><dd>${MS[a.master].name}</dd><dt>Услуги</dt><dd>${esc(svcNames(a))}</dd><dt>Сумма</dt><dd>${rub(a.price)}</dd><dt>Телефон</dt><dd>${fmtPhone(c.phone)}</dd>${a.comment?`<dt>Комментарий</dt><dd>${esc(a.comment)}</dd>`:""}</dl>
-    ${c.note?`<div class="note">${esc(c.note)}</div>`:""}
+    <dl class="kv"><dt>Когда</dt><dd>${dLong(a.date)}, ${hm(a.start)}–${hm(a.start+a.dur)}</dd><dt>Мастер</dt><dd>${MS[a.master].name}</dd><dt>Услуги</dt><dd>${esc(svcNames(a))}</dd><dt>Сумма</dt><dd>${rub(a.price)}</dd><dt>Телефон</dt><dd>${fmtPhone(c.phone)}</dd></dl>
+    <div class="fld"><span class="lbl">Заметка к записи</span><div id="noteBox"></div></div>
+    ${c.note?`<div class="note"><b>О клиенте:</b> ${esc(c.note)}</div>`:""}
     ${rem}
     ${r?`<div class="bot"><span class="l">Дальше</span>Через 2–3 часа после визита — просьба об отзыве. «Пора обновить» — ${dShort(r.due)}${r.kind==="next"?` (процедура ${r.n+1} из ${r.svc.course.n})`:""}.</div>`:""}
     <div id="moveBox"></div><div id="cancelBox"></div>
@@ -565,6 +573,14 @@ function openAppt(id){
      <div class="btns"><button class="btn" id="bMove">Перенести</button><button class="btn" id="bEdit">Изменить</button></div>`:""}
     <div class="btns"><button class="btn pri" id="bAgain">Записать снова</button>${a.status==="booked"?`<button class="btn bad" id="bCancel">Отменить</button>`:`<button class="btn" id="bClient">Карточка клиента</button>`}</div>
    </div>`);
+  const drawNote=edit=>{const box=$("#noteBox");if(!box)return;
+    if(edit){box.innerHTML=`<textarea class="inp" id="noteTa" rows="3" placeholder="Например: дизайн на двух ногтях, принесёт фото">${esc(a.comment)}</textarea><div class="btns" style="margin-top:8px"><button class="btn pri" id="noteOk">Сохранить заметку</button><button class="btn" id="noteNo">Отмена</button></div>`;
+      const ta=$("#noteTa");ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);
+      $("#noteOk").onclick=()=>{const v=ta.value.trim();if(v!==a.comment){a.comment=v;a.log.push([TODAY,v?"Изменена заметка":"Удалена заметка"])}drawNote(false);render();toast(v?"Заметка сохранена":"Заметка удалена")};
+      $("#noteNo").onclick=()=>drawNote(false);return}
+    box.innerHTML=a.comment?`<div class="notebox"><span>${esc(a.comment)}</span><button class="link" id="noteEd">Изменить</button></div>`:`<button class="link" id="noteEd" style="align-self:flex-start">+ Добавить заметку</button>`;
+    $("#noteEd").onclick=()=>drawNote(true)};
+  drawNote(false);
   const on=(s,f)=>{const e=$(s);if(e)e.onclick=f};
   on("#bCame",()=>{a.status="came";a.log.push([TODAY,"Отмечено «Пришёл»"]);const rr=refreshDue(a.client);closeSheet();render();toast(c.bot?`Отмечено. Вечером бот попросит отзыв, «пора обновить» — ${rr?dShort(rr.due):"—"}`:`Отмечено. «Пора обновить» — ${rr?dShort(rr.due):"—"}`)});
   on("#bNo",()=>{a.status="noshow";closeSheet();render();toast("Отмечено «Не пришёл». Запись осталась в истории")});
@@ -589,7 +605,9 @@ function timeOpts(sel){let o="";for(let t=OPEN;t<CLOSE;t+=15)o+=`<option value="
 function openNew(p={}){
   const ed=p.edit?appts.find(a=>a.id===p.edit):null;
   const f={client:ed?ed.client:p.client||null,newName:"",newPhone:"",svcs:ed?[...ed.svcs]:[...(p.svcs||[])],master:ed?ed.master:p.master||(ui.mf!=="all"?ui.mf:"m1"),date:ed?ed.date:p.date||ui.day,start:ed?ed.start:p.start??null,more:false,comment:ed?ed.comment:"",source:"yandex",customPrice:null,useDisc:true,svq:""};
+  f.auto=f.start==null&&!ed;
   if(f.start==null)f.start=firstFree(f.master,f.date,Math.max(30,f.svcs.reduce((s,x)=>s+SV[x].dur,0)));
+  const reauto=()=>{if(f.auto)f.start=firstFree(f.master,f.date,f.svcs.reduce((s,x)=>s+SV[x].dur,0)||30)};
   let q="",kb=0,nc=false;
   const dur=()=>f.svcs.reduce((s,x)=>s+SV[x].dur,0)||30;
   const base=()=>f.svcs.reduce((s,x)=>s+SV[x].price,0);
@@ -631,9 +649,9 @@ function openNew(p={}){
      ${f.start<OPEN||f.start+dur()>CLOSE?`<div class="err">Запись выходит за рабочее время (10:00–21:00). Сохранить можно, но проверьте.</div>`:""}
      ${c&&bdayInfo(c,f.date)?`<div class="disc"><div><b>День рождения ${dShort(bdayInfo(c,f.date).date)} — скидка 20%</b>Действует неделю до и неделю после</div><button class="btn sm" id="dTog">${f.useDisc?"Убрать":"Вернуть"}</button></div>`:""}
      <div class="sum"><div><div class="d">${f.svcs.length?durTxt(dur())+" · до "+hm(f.start+dur()):"выберите услугу"}</div></div><div class="p">${disc()&&f.customPrice==null?`<s>${rub(base())}</s>`:""}${rub(total())}</div></div>
-     <button class="link" id="more" style="align-self:flex-start">${f.more?"Скрыть":"Ещё: комментарий, цена"}${isNew?", откуда узнали":""}</button>
-     ${f.more?`<div class="fld"><label for="ncm">Комментарий</label><input class="inp" id="ncm" value="${esc(f.comment)}" placeholder="Например: дизайн на двух ногтях"></div>
-      <div class="row2"><div class="fld"><label for="npr">Другая цена</label><input class="inp" id="npr" inputmode="numeric" placeholder="${total()}" value="${f.customPrice??""}"></div>
+     <div class="fld"><label for="ncm">Заметка к записи</label><textarea class="inp" id="ncm" rows="2" placeholder="Например: дизайн на двух ногтях, принесёт фото">${esc(f.comment)}</textarea></div>
+     <button class="link" id="more" style="align-self:flex-start">${f.more?"Скрыть":"Ещё: другая цена"}${isNew?", откуда узнали":""}</button>
+     ${f.more?`<div class="row2"><div class="fld"><label for="npr">Другая цена</label><input class="inp" id="npr" inputmode="numeric" placeholder="${total()}" value="${f.customPrice??""}"></div>
       ${isNew?`<div class="fld"><label for="nsrc">Откуда узнали</label><select class="inp" id="nsrc">${[["yandex","Яндекс Карты"],["word","Сарафан"],["other","Другое"]].map(([k,t])=>`<option value="${k}"${f.source===k?" selected":""}>${t}</option>`).join("")}</select></div>`:""}</div>`:""}
      ${isNew&&q.trim()?`<div class="bot"><span class="l">Спросите у клиента</span>«Подскажите день рождения? Мы дарим скидку 20%». Дату можно вписать потом в карточке.</div>`:""}
     </div>
@@ -649,11 +667,11 @@ function openNew(p={}){
     const ncb=$("#ncBtn");if(ncb)ncb.onclick=()=>{nc=true;draw("#nn")};
     const nn=$("#nn"),np=$("#np");if(nn)nn.oninput=()=>f.newName=nn.value;if(np)np.oninput=()=>f.newPhone=np.value;
     const chg=$("#chg");if(chg)chg.onclick=()=>{f.client=null;q="";draw("#nq")};
-    document.querySelectorAll("[data-svc]").forEach(b=>b.onclick=()=>{const id=b.dataset.svc;f.svcs=f.svcs.includes(id)?f.svcs.filter(x=>x!==id):[...f.svcs,id];f.customPrice=null;draw()});
+    document.querySelectorAll("[data-svc]").forEach(b=>b.onclick=()=>{const id=b.dataset.svc;f.svcs=f.svcs.includes(id)?f.svcs.filter(x=>x!==id):[...f.svcs,id];f.customPrice=null;reauto();draw()});
     const als=$("#allSv");if(als)als.onclick=()=>{f.allSv=!f.allSv;draw()};
     const svq=$("#svq");svq.oninput=()=>{f.svq=svq.value;draw("#svq")};
-    $("#nd").onchange=e=>{f.date=e.target.value;draw()};$("#nt").onchange=e=>{f.start=+e.target.value;draw()};$("#nm").onchange=e=>{f.master=e.target.value;draw()};
-    document.querySelectorAll("[data-ft]").forEach(b=>b.onclick=()=>{f.start=+b.dataset.ft;draw()});
+    $("#nd").onchange=e=>{f.date=e.target.value;reauto();draw()};$("#nt").onchange=e=>{f.start=+e.target.value;f.auto=false;draw()};$("#nm").onchange=e=>{f.master=e.target.value;reauto();draw()};
+    document.querySelectorAll("[data-ft]").forEach(b=>b.onclick=()=>{f.start=+b.dataset.ft;f.auto=false;draw()});
     const dt=$("#dTog");if(dt)dt.onclick=()=>{f.useDisc=!f.useDisc;draw()};
     $("#more").onclick=()=>{f.more=!f.more;draw()};
     const cm=$("#ncm");if(cm)cm.oninput=()=>f.comment=cm.value;
@@ -661,7 +679,7 @@ function openNew(p={}){
     const src=$("#nsrc");if(src)src.onchange=()=>f.source=src.value;
     $("#save").onclick=save;
   }
-  function pick(id){f.client=id;q="";if(!f.svcs.length){const lv=lastVisit(id);if(lv)f.svcs=[...lv.svcs]}draw()}
+  function pick(id){f.client=id;q="";if(!f.svcs.length){const lv=lastVisit(id);if(lv){f.svcs=[...lv.svcs];if(f.auto&&!pick.keepMaster)f.master=lv.master}}reauto();draw()}
   let saving=false;
   function save(){
     if(saving)return;
