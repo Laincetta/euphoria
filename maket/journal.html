@@ -200,6 +200,15 @@ table.svc input{width:64px;background:var(--surface2);border:1px solid transpare
 .tpl{background:var(--surface);border-radius:12px;padding:12px 14px;font-size:13px;display:flex;flex-direction:column;gap:4px}
 .tpl b{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:500}
 .hidden-sm{}
+.offday{position:absolute;left:0;right:0;background:repeating-linear-gradient(135deg,transparent 0 7px,color-mix(in srgb,var(--fg) 6%,transparent) 7px 14px);pointer-events:none;display:grid;place-items:center;font-size:11px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase}
+.grp{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:14px}
+.chev{color:var(--faint);font-size:20px;align-self:center}
+button.tpl{border:0;text-align:left;color:var(--fg)}
+button.tpl:hover{background:var(--surface2)}
+.yb{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--accent) 50%,transparent);margin:6px 0 4px}
+.yb div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13px}
+.yb span{color:var(--muted)}
+.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px}
 .ap.hasnote::after{content:"";position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .ap .ntx{font-size:11px;color:var(--muted);white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
 textarea.inp{resize:vertical;min-height:0;line-height:1.4}
@@ -293,7 +302,9 @@ const S=[
 ].map(([id,name,g,dur,price,every,course])=>({id,name,g,dur,price,every,course:course||null}));
 const SV=Object.fromEntries(S.map(s=>[s.id,s]));
 
-const MASTERS=[{id:"m1",name:"Мария",role:"лазер, брови, ресницы"},{id:"m2",name:"Анна",role:"маникюр, педикюр"},{id:"m3",name:"Ольга",role:"стрижки, окрашивание"}];
+const MASTERS=[{id:"m1",name:"Мария",role:"лазер, брови, ресницы",days:[1,2,3,4,5,6],from:600,to:1260},{id:"m2",name:"Анна",role:"маникюр, педикюр",days:[0,1,2,3,4,5,6],from:600,to:1260},{id:"m3",name:"Ольга",role:"стрижки, окрашивание",days:[0,2,3,4,5,6],from:660,to:1260}];
+const actM=()=>MASTERS.filter(m=>!m.gone);
+const actS=()=>S.filter(s=>!s.arch);
 const MS=Object.fromEntries(MASTERS.map(m=>[m.id,m]));
 
 const C0=[
@@ -371,6 +382,22 @@ appts.filter(a=>["c8","c11"].includes(a.client)).forEach(a=>a.source="yandex");
 
 const ui={view:"day",day:TODAY,mf:"all",flash:null,q:"",seg:"today",called:{}};
 
+/* ---------- message templates ---------- */
+const TPL0={
+ confirm:["Вы записаны","{имя}, вы записаны в «Эйфорию»: {услуга}, {дата} в {время}, мастер {мастер}. Парковая ул., 8."],
+ day:["За сутки до визита","{имя}, напоминаем: завтра в {время} у вас {услуга} в «Эйфории», Парковая, 8. Ждём вас!"],
+ h2:["За 2 часа","{имя}, ждём вас сегодня в {время}. Парковая ул., 8."],
+ review:["После визита","{имя}, спасибо, что были у нас! Будем рады вашему отзыву в Яндекс Картах."],
+ refresh:["Пора обновить","{имя}, прошло {срок} после визита ({услуга}) — пора обновить. Позвоните или напишите нам, подберём удобное время."],
+ next:["Следующая процедура курса","{имя}, пора на {номер}-ю процедуру из {всего}: {услуга}. Так результат будет лучше."],
+ course:["Следующий курс","{имя}, прошло полгода после курса: {услуга}. Пора на поддерживающую процедуру или новый курс."],
+ bday7:["День рождения через неделю","{имя}, скоро ваш день рождения! Дарим скидку 20% на все услуги — действует неделю до и неделю после праздника."],
+ bday0:["В день рождения","{имя}, с днём рождения от «Эйфории»! Ваша скидка 20% действует ещё неделю."]
+};
+const TPL=Object.fromEntries(Object.entries(TPL0).map(([k,[t,v]])=>[k,{t,v}]));
+const VARS=["имя","услуга","дата","время","мастер","срок","номер","всего"];
+const fill=(k,o)=>TPL[k].v.replace(/\{([^}]+)\}/g,(m,n)=>o[n]??m);
+
 /* ---------- logic ---------- */
 const svcNames=a=>a.svcs.map(s=>SV[s].name).join(" + ");
 const grp=a=>SV[a.svcs[0]].g;
@@ -395,7 +422,7 @@ function overlaps(master,date,start,dur,ignore){return appts.filter(a=>a.id!==ig
 function freeNear(master,date,start,dur,ignore){const out=[];
   for(let d=15;d<=600&&out.length<4;d+=15){for(const t of [start-d,start+d]){if(t<OPEN||t+dur>CLOSE)continue;if(date===TODAY&&t<nowMin)continue;if(!overlaps(master,date,t,dur,ignore).length&&!out.includes(t))out.push(t)}}
   return out.sort((a,b)=>a-b).slice(0,4)}
-function firstFree(master,date,dur){for(let t=Math.max(OPEN,date===TODAY?Math.ceil(nowMin/15)*15:OPEN);t+dur<=CLOSE;t+=15)if(!overlaps(master,date,t,dur).length)return t;return OPEN}
+function firstFree(master,date,dur){const m=MS[master]||{from:OPEN,to:CLOSE};for(let t=Math.max(m.from,date===TODAY?Math.ceil(nowMin/15)*15:m.from);t+dur<=m.to;t+=15)if(!overlaps(master,date,t,dur).length)return t;return m.from}
 function svcFreq(){const f={};appts.forEach(a=>a.svcs.forEach(s=>f[s]=(f[s]||0)+1));return f}
 
 /* reminders for today */
@@ -403,20 +430,20 @@ function reminders(){
   const cl=CL();const out={today:[],unconf:[],call:[],gone:[],bd:[]};
   const tm=addDays(TODAY,1);
   appts.filter(a=>a.date===tm&&a.status==="booked").forEach(a=>{const c=cl[a.client];
-    if(c.bot){out.today.push({c,kind:"За сутки до визита",at:hm(a.start),msg:`${c.name.split(" ")[0]}, напоминаем: завтра в ${hm(a.start)} у вас ${lc(svcNames(a))} в «Эйфории», Парковая, 8. Ждём вас!`,btn:"Приду · Перенести · Отменить",a});
+    if(c.bot){out.today.push({c,kind:"За сутки до визита",at:hm(a.start),msg:fill("day",{имя:c.name.split(" ")[0],время:hm(a.start),услуга:lc(svcNames(a)),мастер:MS[a.master].name,дата:dShort(a.date)}),btn:"Приду · Перенести · Отменить",a});
       if(!a.reply)out.unconf.push({c,a});}
     else out.call.push({id:"v"+a.id,c,kind:"Напомнить о визите завтра",text:`${hm(a.start)} · ${svcNames(a)} · ${MS[a.master].name}`});
   });
-  appts.filter(a=>a.date===TODAY&&a.status==="booked"&&a.start-120>=nowMin-30).forEach(a=>{const c=cl[a.client];if(c.bot)out.today.push({c,kind:"За 2 часа",at:hm(a.start-120),msg:`Ждём вас сегодня в ${hm(a.start)}. Парковая ул., 8.`,btn:"Как добраться",a})});
-  appts.filter(a=>a.date===TODAY&&a.status==="came").forEach(a=>{const c=cl[a.client];if(c.bot)out.today.push({c,kind:"Отзыв после визита",at:hm(Math.min(a.start+a.dur+150,1260)),msg:`Спасибо, что были у нас! Будем рады вашему отзыву в Яндекс Картах.`,btn:"Оставить отзыв"})});
+  appts.filter(a=>a.date===TODAY&&a.status==="booked"&&a.start-120>=nowMin-30).forEach(a=>{const c=cl[a.client];if(c.bot)out.today.push({c,kind:"За 2 часа",at:hm(a.start-120),msg:fill("h2",{имя:c.name.split(" ")[0],время:hm(a.start),услуга:lc(svcNames(a)),мастер:MS[a.master].name}),btn:"Как добраться",a})});
+  appts.filter(a=>a.date===TODAY&&a.status==="came").forEach(a=>{const c=cl[a.client];if(c.bot)out.today.push({c,kind:"Отзыв после визита",at:hm(Math.min(a.start+a.dur+150,1260)),msg:fill("review",{имя:c.name.split(" ")[0]}),btn:"Оставить отзыв"})});
   clients.forEach(c=>{
     const r=refreshDue(c.id);if(r&&!nextBooked(c.id)){
       const late=diffDays(r.due,TODAY);
       const first=r.svc.name.replace(/^Лазер: |^Комбо: /,"");
       let text;
-      if(r.kind==="next")text=`${c.name.split(" ")[0]}, пора на ${r.n+1}-ю процедуру из ${r.svc.course.n}: ${lc(first)}. Так результат будет лучше.`;
-      else if(r.kind==="course")text=`${c.name.split(" ")[0]}, прошло полгода после курса: ${lc(first)}. Пора на поддерживающую процедуру или новый курс.`;
-      else text=`${c.name.split(" ")[0]}, прошло ${Math.round(diffDays(r.from,TODAY)/7)} ${plural(Math.round(diffDays(r.from,TODAY)/7),"неделя","недели","недель")} после визита (${lc(r.svc.name)}) — пора обновить.`;
+      const wk=Math.round(diffDays(r.from,TODAY)/7);
+      const vars={имя:c.name.split(" ")[0],услуга:lc(r.kind==="refresh"?r.svc.name:first),номер:(r.n||0)+1,всего:r.svc.course?r.svc.course.n:"",срок:`${wk} ${plural(wk,"неделя","недели","недель")}`};
+      text=fill(r.kind==="next"?"next":r.kind==="course"?"course":"refresh",vars);
       const kind=r.kind==="course"?"Следующий курс":late>=7?"Пора обновить · второе":"Пора обновить";
       if(late===0||late===7){ if(c.bot)out.today.push({c,kind,at:"10:00",msg:text,btn:"Позвонить в салон · Написать администратору · Не напоминать"});
         else out.call.push({id:"r"+c.id,c,kind:"Пора обновить",text:`${r.svc.name}, визит ${dShort(r.from)}`});}
@@ -424,7 +451,7 @@ function reminders(){
     }
     const b=c.bday?bdayInfo(c,TODAY):null;
     if(b&&(b.dd===-7||b.dd===0)){
-      const msg=b.dd===-7?`${c.name.split(" ")[0]}, скоро ваш день рождения! Дарим скидку 20% на все услуги — действует неделю до и неделю после праздника.`:`${c.name.split(" ")[0]}, с днём рождения! Ваша скидка 20% действует ещё неделю.`;
+      const msg=fill(b.dd===-7?"bday7":"bday0",{имя:c.name.split(" ")[0]});
       if(c.bot&&c.promo)out.today.push({c,kind:b.dd===0?"День рождения":"День рождения через неделю",at:"10:00",msg,btn:"Позвонить в салон · Отписаться от акций"});
       else out.call.push({id:"b"+c.id,c,kind:b.dd===0?"Поздравить с днём рождения":"День рождения через неделю",text:"Поздравить и предложить скидку 20%"});
     }
@@ -450,13 +477,14 @@ function renderHeader(){
     <div class="s">${day.length} ${plural(day.length,"запись","записи","записей")} · ${durTxt(busy)} занято</div></div>
     ${ui.day!==TODAY?`<button class="ghost" id="goToday">Сегодня</button>`:""}</div>
     <div class="week"><button class="arr" data-shift="-7" aria-label="Прошлая неделя">‹</button>${wk}<button class="arr" data-shift="7" aria-label="Следующая неделя">›</button></div>
-    <div class="chips"><button class="chip${ui.mf==="all"?" on":""}" data-mf="all">Все мастера</button>${MASTERS.map(m=>`<button class="chip${ui.mf===m.id?" on":""}" data-mf="${m.id}">${m.name}</button>`).join("")}</div>
+    <div class="chips"><button class="chip${ui.mf==="all"?" on":""}" data-mf="all">Все мастера</button>${actM().map(m=>`<button class="chip${ui.mf===m.id?" on":""}" data-mf="${m.id}">${m.name}</button>`).join("")}</div>
     <div class="demo">Макет на выдуманных примерах — имена, телефоны и записи ненастоящие</div>`;
 }
 
 /* ---------- day view ---------- */
 function renderDay(){
-  const ms=ui.mf==="all"?MASTERS:MASTERS.filter(m=>m.id===ui.mf);
+  const ms=ui.mf==="all"||!MS[ui.mf]||MS[ui.mf].gone?actM():actM().filter(m=>m.id===ui.mf);
+  const wdx=parse(ui.day).getDay();
   const cl=CL();
   const hpx=parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hpx"))||64;
   const y=m=>(m-OPEN)/60*hpx;
@@ -474,7 +502,9 @@ function renderDay(){
       return `<button class="ap ${a.status}${a.comment?" hasnote":""}${ui.flash===a.id?" flash":""}" style="top:${y(a.start)+1}px;height:${h}px;--g:var(--g-${grp(a)})" data-ap="${a.id}" aria-label="${esc(c.name)}, ${hm(a.start)}">
         <span class="n">${esc(tiny?c.name.split(" ")[0]+" · "+hm(a.start):c.name)}</span>${tiny?"":`<span class="t">${hm(a.start)}–${hm(a.start+a.dur)}</span>`}
         ${short?"":`<span class="svn">${esc(svcNames(a))}</span>`}${a.comment&&h>=120?`<span class="ntx">${esc(a.comment)}</span>`:""}${h>=84&&tags.length?`<span class="tags">${tags.join("")}</span>`:""}</button>`}).join("");
-    return `<div class="col" data-col="${m.id}" style="height:${y(CLOSE)}px">${blocks}</div>`});
+    const off=!m.days.includes(wdx);
+    const shade=off?`<div class="offday" style="top:0;height:${y(CLOSE)}px">выходной</div>`:(m.from>OPEN?`<div class="offday" style="top:0;height:${y(m.from)}px"></div>`:"")+(m.to<CLOSE?`<div class="offday" style="top:${y(m.to)}px;height:${y(CLOSE)-y(m.to)}px"></div>`:"");
+    return `<div class="col" data-col="${m.id}" style="height:${y(CLOSE)}px">${shade}${blocks}</div>`});
   const nowY=ui.day===TODAY&&nowMin>=OPEN&&nowMin<=CLOSE?`<div class="nowline" style="top:${y(nowMin)}px"></div>`:"";
   $("#main").innerHTML=`<div class="view gut"><div class="colhead" style="grid-template-columns:repeat(${ms.length},minmax(0,1fr))">${ms.map(m=>`<div><b>${m.name}</b><span class="hidden-sm"> · ${m.role}</span></div>`).join("")}</div>
     <div class="tl" id="tl"><div class="hours">${hours}</div><div class="cols" style="grid-template-columns:repeat(${ms.length},minmax(0,1fr))">${cols.join("")}</div>${nowY}</div>
@@ -531,26 +561,110 @@ function renderRem(){
 }
 
 /* ---------- settings ---------- */
+const DAYS=[[1,"Пн"],[2,"Вт"],[3,"Ср"],[4,"Чт"],[5,"Пт"],[6,"Сб"],[0,"Вс"]];
+const daysTxt=d=>d.length===7?"ежедневно":DAYS.filter(([k])=>d.includes(k)).map(([,t])=>t).join(", ");
+function svcSub(s){return `${durTxt(s.dur)} · ${rub(s.price)} · ${s.course?`курс ${s.course.n} проц., через ${s.course.gap} дн., следующий курс через ${Math.round(s.course.next/30)} мес.`:s.every?`пора обновить через ${s.every} дн.`:"не напоминаем"}`}
 function renderSet(){
-  const groups=Object.keys(GROUPS);
+  const g=Object.keys(GROUPS);
   $("#main").innerHTML=`<div class="view gut">
-   <h3 class="sec">услуги и сроки «пора обновить»</h3><p class="intro">Прайс загружен из прайс-листа салона. Длительность нужна, чтобы журнал видел накладки; срок повтора — для напоминаний. Цифры меняются прямо здесь.</p>
-   <div class="list">${S.map(s=>`<div class="li svrow" style="--g:var(--g-${s.g})"><span class="dot"></span><div class="main"><b>${esc(s.name)}</b><span class="sub">${rub(s.price)}${s.course?` · курс ${s.course.n} процедур, через ${s.course.gap} дн., следующий курс через ${Math.round(s.course.next/30)} мес.`:s.every?"":" · не напоминаем"}</span></div>
-     <label class="mini">мин<input type="number" step="5" min="5" value="${s.dur}" data-sv="${s.id}" data-k="dur" aria-label="Длительность, минут"></label>
-     ${s.course?`<span class="mini"></span>`:`<label class="mini">повтор, дн<input type="number" min="0" value="${s.every}" data-sv="${s.id}" data-k="every" aria-label="Пора обновить через, дней"></label>`}</div>`).join("")}</div>
-   <h3 class="sec">мастера</h3><div class="list">${MASTERS.map(m=>`<div class="li"><div class="main"><b>${m.name}</b><span class="sub">${m.role}</span></div><div class="side">ежедневно<br>10:00–21:00</div></div>`).join("")}</div>
-   <h3 class="sec">тексты сообщений</h3><p class="intro">В фигурных скобках — то, что бот подставит сам.</p>
-   <div style="display:flex;flex-direction:column;gap:8px">
-    <div class="tpl"><b>Вы записаны</b>{имя}, вы записаны в «Эйфорию»: {услуга}, {дата} в {время}, мастер {мастер}. Парковая ул., 8.</div>
-    <div class="tpl"><b>За сутки</b>{имя}, напоминаем: завтра в {время} у вас {услуга}. Ждём вас!</div>
-    <div class="tpl"><b>Пора обновить</b>{имя}, прошло {недель} после визита ({услуга}) — пора обновить. Позвоните или напишите нам, подберём удобное время.</div>
-    <div class="tpl"><b>Курс</b>{имя}, пора на {номер}-ю процедуру из {всего}: {услуга}.</div>
-    <div class="tpl"><b>День рождения</b>{имя}, скоро ваш день рождения! Дарим скидку 20% на все услуги — неделю до и неделю после праздника.</div>
-   </div>
+   <h3 class="sec">услуги и цены</h3><p class="intro">Нажмите на услугу, чтобы поменять цену, длительность или срок «пора обновить». Старые записи сохраняют цену на момент записи.</p>
+   <div class="yb"><div><b>Прайс в Яндекс Картах</b><span>Изменили цены — обновите прайс в Яндексе: журнал соберёт файл сам, загрузка займёт минуту.</span></div><button class="btn sm" id="ybBtn">Как обновить</button></div>
+   ${g.map(k=>{const list=actS().filter(s=>s.g===k);if(!list.length)return "";return `<div class="grp">${GROUPS[k]}</div><div class="list">${list.map(s=>`<button class="li svrow" style="--g:var(--g-${s.g})" data-svedit="${s.id}"><span class="dot"></span><div class="main"><b>${esc(s.name)}</b><span class="sub">${svcSub(s)}</span></div><span class="chev">›</span></button>`).join("")}</div>`}).join("")}
+   <button class="btn sm" id="svAdd" style="margin-top:10px">+ Новая услуга</button>
+   <h3 class="sec">мастера</h3><p class="intro">Рабочие дни и часы мастера видны в журнале: в выходные и вне часов колонка затемнена.</p>
+   <div class="list">${actM().map(m=>`<button class="li" data-medit="${m.id}"><div class="main"><b>${esc(m.name)}</b><span class="sub">${esc(m.role)}</span></div><div class="side">${daysTxt(m.days)}<br>${hm(m.from)}–${hm(m.to)}</div><span class="chev">›</span></button>`).join("")}</div>
+   <button class="btn sm" id="mAdd" style="margin-top:10px">+ Добавить мастера</button>
+   <h3 class="sec">тексты сообщений</h3><p class="intro">Нажмите на текст, чтобы изменить его. В фигурных скобках — то, что бот подставит сам.</p>
+   <div style="display:flex;flex-direction:column;gap:8px">${Object.entries(TPL).map(([k,t])=>`<button class="tpl" data-tedit="${k}"><b>${t.t}</b><span>${esc(t.v)}</span></button>`).join("")}</div>
    <h3 class="sec">рассылка акций</h3><p class="intro">Экран «Акции» — во второй очереди: текст, фото, кому отправить, не чаще раза в неделю, в каждом сообщении «Отписаться».</p>
   </div>`;
 }
-
+function openSvc(id){
+  const s=id?SV[id]:{id:null,name:"",g:"nails",dur:60,price:0,every:28,course:null};
+  let mode=s.course?"course":s.every?"every":"none";
+  const used=id?appts.filter(a=>a.svcs.includes(id)&&a.status==="booked").length:0;
+  const draw=()=>{
+    $("#sheet").innerHTML=`<div class="grab"></div><div class="sh-head"><h2>${id?"Услуга":"Новая услуга"}</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
+    <div class="sh-body">
+     <div class="fld"><label for="sName">Название</label><input class="inp" id="sName" value="${esc(s.name)}" placeholder="Например: Маникюр + дизайн"></div>
+     <div class="fld"><label for="sGrp">Раздел</label><select class="inp" id="sGrp">${Object.entries(GROUPS).map(([k,t])=>`<option value="${k}"${k===s.g?" selected":""}>${t}</option>`).join("")}</select></div>
+     <div class="row2"><div class="fld"><label for="sPrice">Цена, ₽</label><input class="inp" id="sPrice" inputmode="numeric" value="${s.price||""}"></div><div class="fld"><label for="sDur">Длительность, мин</label><input class="inp" id="sDur" type="number" step="5" min="5" value="${s.dur}"></div></div>
+     <div class="fld"><span class="lbl">Напоминание после визита</span><div class="svlist">${[["every","Пора обновить"],["course","Курс"],["none","Не напоминать"]].map(([k,t])=>`<button class="sv${mode===k?" on":""}" data-mode="${k}">${t}</button>`).join("")}</div></div>
+     ${mode==="every"?`<div class="fld"><label for="sEvery">Через сколько дней</label><input class="inp" id="sEvery" type="number" min="1" value="${s.every||28}"></div>`:""}
+     ${mode==="course"?`<div class="row"><div class="fld"><label for="sN">Процедур</label><input class="inp" id="sN" type="number" min="2" value="${s.course?s.course.n:6}"></div><div class="fld"><label for="sGap">Между, дн</label><input class="inp" id="sGap" type="number" min="1" value="${s.course?s.course.gap:28}"></div><div class="fld"><label for="sNext">След. курс, мес</label><input class="inp" id="sNext" type="number" min="1" value="${s.course?Math.round(s.course.next/30):6}"></div></div>`:""}
+     <div id="svDel"></div>
+    </div>
+    <div class="sh-foot"><button class="btn pri" id="sSave">Сохранить</button>${id?`<button class="btn bad" id="sArch">Убрать из прайса</button>`:""}</div>`;
+    document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{keep();mode=b.dataset.mode;draw()});
+    $("#sSave").onclick=save;
+    const ar=$("#sArch");if(ar)ar.onclick=()=>{$("#svDel").innerHTML=`<div class="err"><b>Убрать «${esc(s.name)}» из прайса?</b><span>Её не будет в новых записях. Старые записи сохранят название и цену${used?`; будущих записей с ней — ${used}, они останутся`:""}.</span><div class="btns"><button class="btn bad" id="arYes">Убрать</button><button class="btn" id="arNo">Оставить</button></div></div>`;
+      $("#arYes").onclick=()=>{s.arch=true;closeSheet();render();toast("Услуга убрана из прайса")};$("#arNo").onclick=()=>$("#svDel").innerHTML=""};
+  };
+  const keep=()=>{s.name=$("#sName").value;s.g=$("#sGrp").value;s.price=+digits($("#sPrice").value)||0;s.dur=+$("#sDur").value||s.dur;
+    if($("#sEvery"))s.every=+$("#sEvery").value||0;if($("#sN"))s._c={n:+$("#sN").value||6,gap:+$("#sGap").value||28,next:(+$("#sNext").value||6)*30}};
+  const save=()=>{keep();if(!s.name.trim()){toast("Впишите название услуги");return}if(!s.price){toast("Впишите цену");return}
+    s.dur=Math.max(5,Math.round(s.dur/5)*5);
+    if(mode==="course"){s.course=s._c||s.course||{n:6,gap:28,next:180};s.every=0}else{s.course=null;if(mode==="none")s.every=0}
+    delete s._c;
+    if(!id){s.id="s"+Date.now();S.push(s);SV[s.id]=s}
+    closeSheet();render();toast("Сохранено. Не забудьте обновить прайс в Яндекс Картах")};
+  openSheet("",null,true);draw();
+}
+function openMaster(id){
+  const m=id?MS[id]:{id:null,name:"",role:"",days:[1,2,3,4,5,6],from:600,to:1260};
+  const d={name:m.name,role:m.role,days:[...m.days],from:m.from,to:m.to};
+  const fut=id?appts.filter(a=>a.master===id&&a.status==="booked"&&a.date>=TODAY).length:0;
+  const draw=()=>{
+    $("#sheet").innerHTML=`<div class="grab"></div><div class="sh-head"><h2>${id?"Мастер":"Новый мастер"}</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
+    <div class="sh-body">
+     <div class="fld"><label for="mName">Имя</label><input class="inp" id="mName" value="${esc(d.name)}"></div>
+     <div class="fld"><label for="mRole">Что делает</label><input class="inp" id="mRole" value="${esc(d.role)}" placeholder="Например: маникюр, педикюр"></div>
+     <div class="fld"><span class="lbl">Рабочие дни</span><div class="svlist">${DAYS.map(([k,t])=>`<button class="sv${d.days.includes(k)?" on":""}" data-wd="${k}">${t}</button>`).join("")}</div></div>
+     <div class="row2"><div class="fld"><label for="mFrom">С</label><select class="inp" id="mFrom">${timeOpts(d.from)}</select></div><div class="fld"><label for="mTo">До</label><select class="inp" id="mTo">${timeOpts(d.to)}<option value="${CLOSE}"${d.to===CLOSE?" selected":""}>${hm(CLOSE)}</option></select></div></div>
+     <div id="mDel"></div>
+    </div>
+    <div class="sh-foot"><button class="btn pri" id="mSave">Сохранить</button>${id?`<button class="btn bad" id="mGone">Убрать мастера</button>`:""}</div>`;
+    const keep=()=>{d.name=$("#mName").value;d.role=$("#mRole").value;d.from=+$("#mFrom").value;d.to=+$("#mTo").value};
+    document.querySelectorAll("[data-wd]").forEach(b=>b.onclick=()=>{keep();const k=+b.dataset.wd;d.days=d.days.includes(k)?d.days.filter(x=>x!==k):[...d.days,k];draw()});
+    $("#mSave").onclick=()=>{keep();if(!d.name.trim()){toast("Впишите имя мастера");return}if(d.to<=d.from){toast("Конец рабочего дня должен быть позже начала");return}
+      if(id)Object.assign(m,d);else{const nm={id:"m"+Date.now(),...d};MASTERS.push(nm);MS[nm.id]=nm}
+      closeSheet();render();toast("Сохранено")};
+    const gb=$("#mGone");if(gb)gb.onclick=()=>{
+      $("#mDel").innerHTML=fut?`<div class="err"><b>У ${esc(m.name)} ещё ${fut} ${plural(fut,"будущая запись","будущие записи","будущих записей")}</b><span>Сначала перенесите их к другим мастерам, потом мастера можно убрать.</span></div>`
+       :`<div class="err"><b>Убрать ${esc(m.name)} из журнала?</b><span>Колонка исчезнет, история визитов с этим мастером останется.</span><div class="btns"><button class="btn bad" id="gYes">Убрать</button><button class="btn" id="gNo">Оставить</button></div></div>`;
+      const y=$("#gYes");if(y){y.onclick=()=>{m.gone=true;if(ui.mf===id)ui.mf="all";closeSheet();render();toast("Мастер убран")};$("#gNo").onclick=()=>$("#mDel").innerHTML=""}};
+  };
+  openSheet("",null,true);draw();
+}
+function openTpl(k){
+  const t=TPL[k];let v=t.v;
+  const sample={имя:"Анна",услуга:"маникюр + шеллак",дата:"24 октября",время:"15:00",мастер:"Анна",срок:"3 недели",номер:"4",всего:"6"};
+  const draw=()=>{
+    $("#sheet").innerHTML=`<div class="grab"></div><div class="sh-head"><h2>${t.t}</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
+    <div class="sh-body">
+     <div class="fld"><label for="tTa">Текст сообщения</label><textarea class="inp" id="tTa" rows="5">${esc(v)}</textarea></div>
+     <div class="fld"><span class="lbl">Вставить</span><div class="svlist">${VARS.map(x=>`<button class="sv" data-var="${x}">{${x}}</button>`).join("")}</div></div>
+     <div class="fld"><span class="lbl">Так увидит клиент</span><div class="bot" id="tPrev"></div></div>
+    </div>
+    <div class="sh-foot"><button class="btn pri" id="tSave">Сохранить</button><button class="btn" id="tReset">Вернуть как было</button></div>`;
+    const ta=$("#tTa"),pv=()=>{$("#tPrev").textContent=ta.value.replace(/\{([^}]+)\}/g,(m,n)=>sample[n]??m)};pv();
+    ta.oninput=()=>{v=ta.value;pv()};
+    document.querySelectorAll("[data-var]").forEach(b=>b.onclick=()=>{const a=ta.selectionStart??ta.value.length,e=ta.selectionEnd??a;ta.value=ta.value.slice(0,a)+"{"+b.dataset.var+"}"+ta.value.slice(e);v=ta.value;pv();ta.focus();const pos=a+b.dataset.var.length+2;ta.setSelectionRange(pos,pos)});
+    $("#tSave").onclick=()=>{if(!ta.value.trim()){toast("Текст не может быть пустым");return}t.v=ta.value.trim();closeSheet();render();toast("Текст сохранён — бот будет писать так")};
+    $("#tReset").onclick=()=>{v=TPL0[k][1];draw()};
+  };
+  openSheet("",null,true);draw();
+}
+function openYandex(){
+  openSheet(`<div class="sh-head"><h2>Прайс в Яндекс Картах</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
+  <div class="sh-body">
+   <p class="intro" style="margin:0">Сам Яндекс автоматически обновляет прайс только у сетей от 30 филиалов. Для одного салона прайс загружается файлом — журнал соберёт его сам из актуальных цен.</p>
+   <ol class="steps"><li>Нажмите «Скачать прайс для Яндекса» — придёт файл в формате Яндекс Бизнеса.</li><li>Откройте business.yandex.ru → «Эйфория» → «Товары и услуги» → «Загрузить файл».</li><li>Выберите файл. Новый файл заменяет старый прайс целиком.</li></ol>
+   <div class="bot"><span class="l">В прайсе сейчас</span>${actS().length} ${plural(actS().length,"услуга","услуги","услуг")} в ${new Set(actS().map(s=>s.g)).size} разделах</div>
+  </div>
+  <div class="sh-foot"><button class="btn pri" id="ybDl">Скачать прайс для Яндекса</button></div>`);
+  $("#ybDl").onclick=()=>toast("В настоящем журнале здесь скачается файл. В макете скачивание отключено");
+}
 /* ---------- appointment sheet ---------- */
 function openAppt(id){
   const a=appts.find(x=>x.id===id);const c=CL()[a.client];
@@ -591,7 +705,7 @@ function openAppt(id){
     $("#cYes").onclick=()=>{a.status="cancelled";a.log.push([TODAY,"Отменено"]);closeSheet();render();toast("Запись отменена")};$("#cNo").onclick=()=>$("#cancelBox").innerHTML="";$("#cancelBox").scrollIntoView({block:"nearest"})});
   on("#bMove",()=>{let d=a.date,t=a.start,m=a.master;
     const draw=()=>{const conf=overlaps(m,d,t,a.dur,a.id);
-      $("#moveBox").innerHTML=`<div class="fld"><span class="lbl">Новое время</span><div class="row"><input class="inp" type="date" id="mvD" value="${d}"><select class="inp" id="mvT">${timeOpts(t)}</select><select class="inp" id="mvM">${MASTERS.map(x=>`<option value="${x.id}"${x.id===m?" selected":""}>${x.name}</option>`).join("")}</select></div>
+      $("#moveBox").innerHTML=`<div class="fld"><span class="lbl">Новое время</span><div class="row"><input class="inp" type="date" id="mvD" value="${d}"><select class="inp" id="mvT">${timeOpts(t)}</select><select class="inp" id="mvM">${actM().map(x=>`<option value="${x.id}"${x.id===m?" selected":""}>${x.name}</option>`).join("")}</select></div>
        ${conf.length?`<div class="err">В это время у ${MS[m].name} уже ${esc(CL()[conf[0].client].name)}. Свободно: <div class="svlist">${freeNear(m,d,t,a.dur,a.id).map(x=>`<button class="sv" data-mt="${x}">${hm(x)}</button>`).join("")}</div></div>`:""}
        <button class="btn pri" id="mvOk"${conf.length?" disabled style='opacity:.5'":""}>Перенести на ${dShort(d)}, ${hm(t)}</button></div>`;
       $("#mvD").onchange=e=>{d=e.target.value;draw()};$("#mvT").onchange=e=>{t=+e.target.value;draw()};$("#mvM").onchange=e=>{m=e.target.value;draw()};
@@ -621,7 +735,7 @@ function openNew(p={}){
     const sug=suggestions();const qd=digits(q);
     const freq=svcFreq();
     const lv=c?lastVisit(c.id):null;
-    let svList=S.slice().sort((x,y)=>(freq[y.id]||0)-(freq[x.id]||0));
+    let svList=actS().sort((x,y)=>(freq[y.id]||0)-(freq[x.id]||0));
     if(f.svq){const s=lc(f.svq);svList=svList.filter(x=>lc(x.name).includes(s))}
     const shown=f.svq||f.allSv?svList:svList.slice(0,8);
     f.svcs.forEach(id=>{if(!shown.find(s=>s.id===id))shown.unshift(SV[id])});
@@ -641,12 +755,12 @@ function openNew(p={}){
      <div class="fld"><label>${f.svcs.length>1?"Услуги":"Услуга"}</label>
       <input class="inp" id="svq" placeholder="Поиск по прайсу" value="${esc(f.svq)}" autocomplete="off">
       <div class="svlist">${shown.map(s=>`<button class="sv${f.svcs.includes(s.id)?" on":""}" style="--g:var(--g-${s.g})" data-svc="${s.id}">${esc(s.name)}<small>${durTxt(s.dur)} · ${rub(s.price)}</small></button>`).join("")}</div>
-      ${!f.svq?`<button class="link" id="allSv" style="align-self:flex-start">${f.allSv?"Только частые услуги":"Все услуги прайса ("+S.length+")"}</button>`:""}
+      ${!f.svq?`<button class="link" id="allSv" style="align-self:flex-start">${f.allSv?"Только частые услуги":"Все услуги прайса ("+actS().length+")"}</button>`:""}
       ${cn?`<span class="tag acc" style="align-self:flex-start">процедура ${cn} из ${SV[f.svcs[0]].course.n}</span>`:""}
      </div>
-     <div class="fld"><label>Когда и к кому</label><div class="row"><input class="inp" type="date" id="nd" value="${f.date}"><select class="inp" id="nt">${timeOpts(f.start)}</select><select class="inp" id="nm">${MASTERS.map(x=>`<option value="${x.id}"${x.id===f.master?" selected":""}>${x.name}</option>`).join("")}</select></div></div>
+     <div class="fld"><label>Когда и к кому</label><div class="row"><input class="inp" type="date" id="nd" value="${f.date}"><select class="inp" id="nt">${timeOpts(f.start)}</select><select class="inp" id="nm">${actM().map(x=>`<option value="${x.id}"${x.id===f.master?" selected":""}>${x.name}</option>`).join("")}</select></div></div>
      ${conf.length?`<div class="err"><span>В ${hm(f.start)}–${hm(f.start+dur())} у ${MS[f.master].name} уже ${esc(CL()[conf[0].client].name)} (${hm(conf[0].start)}–${hm(conf[0].start+conf[0].dur)}). Ближайшее свободное:</span><div class="svlist">${freeNear(f.master,f.date,f.start,dur(),ed&&ed.id).map(x=>`<button class="sv" data-ft="${x}">${hm(x)}</button>`).join("")||"<span>в этот день мест нет</span>"}</div></div>`:""}
-     ${f.start<OPEN||f.start+dur()>CLOSE?`<div class="err">Запись выходит за рабочее время (10:00–21:00). Сохранить можно, но проверьте.</div>`:""}
+     ${(()=>{const mm=MS[f.master];const wd=parse(f.date).getDay();if(!mm.days.includes(wd))return `<div class="err">У ${mm.name} в этот день выходной. Сохранить можно, но проверьте.</div>`;if(f.start<mm.from||f.start+dur()>mm.to)return `<div class="err">Запись выходит за часы ${mm.name} (${hm(mm.from)}–${hm(mm.to)}). Сохранить можно, но проверьте.</div>`;return ""})()}
      ${c&&bdayInfo(c,f.date)?`<div class="disc"><div><b>День рождения ${dShort(bdayInfo(c,f.date).date)} — скидка 20%</b>Действует неделю до и неделю после</div><button class="btn sm" id="dTog">${f.useDisc?"Убрать":"Вернуть"}</button></div>`:""}
      <div class="sum"><div><div class="d">${f.svcs.length?durTxt(dur())+" · до "+hm(f.start+dur()):"выберите услугу"}</div></div><div class="p">${disc()&&f.customPrice==null?`<s>${rub(base())}</s>`:""}${rub(total())}</div></div>
      <div class="fld"><label for="ncm">Заметка к записи</label><textarea class="inp" id="ncm" rows="2" placeholder="Например: дизайн на двух ногтях, принесёт фото">${esc(f.comment)}</textarea></div>
@@ -727,6 +841,12 @@ document.addEventListener("click",e=>{
   if(t.dataset.called){ui.called[t.dataset.called]=!ui.called[t.dataset.called];render();return}
   if(t.dataset.ap&&!t.closest("#sheet")){openAppt(t.dataset.ap);return}
   if(t.dataset.cl){openClient(t.dataset.cl);return}
+  if(t.dataset.svedit){openSvc(t.dataset.svedit);return}
+  if(t.dataset.medit){openMaster(t.dataset.medit);return}
+  if(t.dataset.tedit){openTpl(t.dataset.tedit);return}
+  if(t.id==="svAdd"){openSvc(null);return}
+  if(t.id==="mAdd"){openMaster(null);return}
+  if(t.id==="ybBtn"){openYandex();return}
   if(t.classList.contains("col")&&!e.target.closest(".ap")){
     const rect=t.getBoundingClientRect();const hpx=parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hpx"))||64;
     let m=OPEN+Math.floor((e.clientY-rect.top)/hpx*60/15)*15;m=Math.max(OPEN,Math.min(m,CLOSE-30));
