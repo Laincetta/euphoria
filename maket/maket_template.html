@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Эйфория в Картах — макет</title>
+<title>Эйфория в Яндекс Картах</title>
 <style>
 :root{--ink:#1d1d1f;--muted:#7b7b80;--faint:#a5a5aa;--line:#ececee;--bg:#fff;--soft:#f3f3f5;--accent:#2f6fec;--green:#2e9e4f;--gold:#c8a46b;--page:#e8e6e1}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -67,7 +67,7 @@ h2{font-size:22px;line-height:1.15}
 .cards::-webkit-scrollbar{display:none}
 .card{flex:none;width:140px;cursor:pointer}
 .thumb{height:104px;border-radius:12px;background:linear-gradient(135deg,#2b2b2e,#5a5a5f);position:relative;overflow:hidden;display:flex;align-items:flex-end;padding:8px}
-.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:grayscale(1)}
+.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .thumb span{position:relative;font-size:10.5px;color:#fff;background:rgba(0,0,0,.45);border-radius:6px;padding:1px 6px}
 .card .n{font-size:13px;line-height:1.3;margin-top:6px;height:51px;overflow:hidden}
 .card .p{font-weight:700;font-size:14px;margin-top:2px}
@@ -201,16 +201,17 @@ $('map').innerHTML = `<svg viewBox="0 0 390 844" preserveAspectRatio="xMidYMid s
 
 /* ---------- данные ---------- */
 const SV = D.services, CATS = [...new Set(SV.map((s) => s.cat))];
-const photo = (s) => !s || !s.photo ? '' : /^https?:/.test(s.photo) ? s.photo : 'https://images.unsplash.com/photo-' + s.photo + '?auto=format&fit=crop&w=300&q=60';
-const thumb = (s, label) => '<div class="thumb">' + (photo(s) ? '<img loading="lazy" src="' + photo(s) + '" onerror="this.remove()" alt="">' : '') + '<span>' + esc(label || 'фото салона') + '</span></div>';
+const photo = (s) => !s || !s.photo ? '' : s.photo.startsWith('svc:') ? (D.imgs.svc[s.photo.slice(4)] || '') : /^https?:/.test(s.photo) ? s.photo : 'https://images.unsplash.com/photo-' + s.photo + '?auto=format&fit=crop&w=300&q=60';
+const thumb = (s, label) => '<div class="thumb">' + (photo(s) ? '<img loading="lazy" src="' + photo(s) + '" onerror="this.remove()" alt="">' : '') + (label || !photo(s) ? '<span>' + esc(label || 'фото салона') + '</span>' : '') + '</div>';
 const nowOpen = () => { const h = new Date().getHours(); return h >= S.open && h < S.close; };
 const stars = (r) => { const n = Math.floor(parseFloat(String(r).replace(',', '.'))); return '★'.repeat(n) + '<b>' + '★'.repeat(5 - n) + '</b>'; };
 
 function render() {
   const sc = $('scroll'), keep = sc.scrollTop;
+  const NPH = 1 + D.imgs.salon.length;
   let h = '<div class="gallery"><img src="' + D.imgs.cover + '" data-a="photos" alt="Обложка">' +
-    D.imgs.stories.map((src, i) => '<img src="' + src + '" data-a="story" data-v="' + i + '" alt="">').join('') +
-    '<div class="ph" data-a="photos">+' + S.photosCount + ' фото<br>после фотосессии</div></div>';
+    D.imgs.salon.slice(0, 7).map((src) => '<img src="' + src + '" data-a="photos" alt="Фото салона">').join('') +
+    '<div class="ph" data-a="photos">Все ' + NPH + ' фото</div></div>';
   h += '<div class="pad"><div class="head"><img class="logo" src="' + D.imgs.logo + '" alt=""><div><h2>' + esc(S.name) + '</h2><div class="cat">Салон красоты · Лазерная эпиляция</div></div></div>' +
     '<div class="rate"><b>' + esc(S.rating) + '</b><span class="stars">' + stars(S.rating) + '</span><span style="color:var(--muted)">' + esc(S.ratingsCount) + ' · ' + S.reviewsCount + ' отзывов</span></div>' +
     '<div class="open">' + (nowOpen() ? '<b class="g">Открыто</b> до ' + S.close + ':00' : '<b class="r">Закрыто</b> до ' + S.open + ':00') + ' · ' + esc(S.addressShort) + '</div>' +
@@ -218,7 +219,7 @@ function render() {
     '<button data-a="site">' + IC.site + 'Сайт</button><button data-a="share">' + IC.share + 'Поделиться</button></div>' +
     '<div class="promo" data-a="promo"><b>Акция</b><span>' + esc(D.offer.promoLine) + '</span></div></div>';
   h += '<div class="stories">' + D.stories.map((s, i) => '<div class="st' + (st.seen.has(i) ? ' seen' : '') + '" data-a="story" data-v="' + i + '"><div class="ring"><img src="' + D.imgs.stories[i] + '" alt=""></div><span>' + esc(s.caption) + '</span></div>').join('') + '</div>';
-  const tabs = [['overview', 'Обзор'], ['prices', 'Цены', SV.length], ['photos', 'Фото', S.photosCount], ['reviews', 'Отзывы', S.reviewsCount], ['features', 'Особенности']];
+  const tabs = [['overview', 'Обзор'], ['prices', 'Цены', SV.length], ['photos', 'Фото', NPH], ['reviews', 'Отзывы', S.reviewsCount], ['features', 'Особенности']];
   h += '<div class="tabs">' + tabs.map(([k, n, c]) => '<button class="' + (st.tab === k ? 'on' : '') + '" data-a="tab" data-v="' + k + '">' + n + (c ? '<small>' + c + '</small>' : '') + '</button>').join('') + '</div>';
   h += ({ overview, prices, photos, reviews, features }[st.tab])();
   sc.innerHTML = h + '<div style="height:40px"></div>';
@@ -246,9 +247,8 @@ function prices() {
       : '<p class="desc" style="padding:20px 0">Ничего не нашлось</p>') + '</div>';
 }
 function photos() {
-  const ph = Array.from({ length: 9 }, () => '<div class="ph">фото салона после фотосессии</div>').join('');
-  return '<div class="sec"><div class="grid"><img src="' + D.imgs.cover + '" alt=""><img src="' + D.imgs.logo + '" alt="">' +
-    D.imgs.stories.map((s, i) => '<img src="' + s + '" data-a="story" data-v="' + i + '" alt="">').join('') + ph + '</div></div>';
+  return '<div class="sec"><div class="grid"><img src="' + D.imgs.cover + '" alt="Обложка">' +
+    D.imgs.salon.map((s) => '<img src="' + s + '" alt="Фото салона">').join('') + '</div></div>';
 }
 function reviews() {
   return '<div class="sec"><div class="big"><b>' + esc(S.rating) + '</b><div><div class="stars" style="font-size:18px">' + stars(S.rating) + '</div><div style="color:var(--muted);font-size:13px">' + esc(S.ratingsCount) + ' · ' + S.reviewsCount + ' отзывов</div></div></div>' +
