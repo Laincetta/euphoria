@@ -4,7 +4,7 @@ import pathlib
 
 ROOT = pathlib.Path(__file__).parent
 
-P = {  # фото Unsplash (бесплатные, для примера; заменить на фото салона)
+P = {  # старые фото Unsplash — больше не используются, оставлены для справки
     "interior": "1600948836101-f9ffda59d250", "interior2": "1633681926022-84c23e8cb2d6",
     "laser": "1700760933574-9f0f4ea9aa3b", "laser2": "1700760933941-3a06a28fbf47",
     "lash": "1589710751893-f9a6770ad71b", "lash2": "1639629509821-c54cdd984227",
@@ -116,12 +116,38 @@ for sid, n, t, sp, frm in [("st-brush", "Локоны на брашинг", "2 5
                            ("st-afro", "Афро-кудри", "2 500 / 3 500 ₽", 2500, True), ("st-wedding", "Свадебная причёска", "от 5 000 ₽", 5000, True)]:
     add("Укладки", "styling", sid, n, sp, t, frm=frm, photo=P["blow"])
 
+# Фото услуг: сгенерированы в интерьере салона по фото 19.10.2026, лежат в репозитории (папка photos/)
+PH = "https://raw.githubusercontent.com/Laincetta/euphoria/main/photos/"
+SVC_PHOTO = {
+    "lz-lip": "laser_face_0", "lz-chin": "laser_face_0", "lz-forehead": "laser_face_0", "lz-face": "laser_face_0", "lz-neck": "laser_face_0",
+    "lz-areola": "laser_underarm_1", "lz-back": "laser_underarm_1", "lz-belly": "laser_underarm_1", "lz-arms": "laser_underarm_1",
+    "lz-forearms": "laser_underarm_1", "lz-fingers": "laser_underarm_1", "lz-armpits": "laser_underarm_0",
+    "lz-legs": "laser_legs_0", "lz-shins": "laser_legs_0", "lz-bikini-t": "laser_legs_1", "lz-bikini-c": "laser_legs_1",
+    "cb-ab": "laser_underarm_0", "cb-fab": "laser_face_0", "cb-sab": "laser_legs_0", "cb-full": "laser_legs_1", "cb-cfs": "laser_legs_1",
+    "brow-art": "brow_shaping_1", "brow-fix": "brow_correction_0", "brow-color": "brow_tint_0", "tattoo-off": "laser_tattoo_1",
+    "carbon": "carbon_peel_1", "ears": "ear_piercing_1",
+    "lash-0": "lash_classic_0", "lash-1": "lash_classic_0", "lash-2": "lash_volume_0", "lash-3": "lash_volume_1", "lash-4": "lash_volume_0", "lash-5": "lash_volume_1",
+    "mani": "manicure_0", "mani-shellac": "manicure_gel_1", "mani-gel": "manicure_gel_0", "mani-french": "french_1", "mani-ext": "nail_extension_1", "mani-off": "manicure_1",
+    "pedi": "pedicure_0", "pedi-gel": "pedicure_gel_0", "pedi-hard": "pedicure_1", "pedi-lite": "pedicure_gel_1", "pedi-french": "pedicure_gel_1", "pedi-off": "pedicure_0",
+    "hw-short": "cut_bob_1", "hw-mid": "cut_women_0", "hw-long": "cut_women_1", "hw-cut": "cut_women_1", "hw-bangs": "cut_women_0",
+    "hw-hot": "cut_women_0", "hw-cascade": "cut_women_1", "hw-bob": "cut_bob_0",
+    "hm-one": "cut_men_0", "hm-two": "cut_men_0", "hm-model": "cut_men_1", "hm-kid": "cut_men_1", "hm-wash": "wash_1",
+    "c-complex": "color_balayage_0", "c-micro": "color_balayage_1", "c-black": "color_roots_1", "c-total": "color_balayage_1", "c-dark": "color_roots_1",
+    "c-high": "color_balayage_0", "c-mix": "color_balayage_1", "c-roots": "color_roots_1", "c-one": "color_roots_0",
+    "care-keratin": "keratin_0", "care-shield": "keratin_1", "care-peel": "wash_0", "care-wash": "wash_0",
+    "st-brush": "styling_0", "st-style": "styling_1", "st-afro": "styling_1", "st-wedding": "wedding_0",
+}
+for s in services:
+    s["photo"] = PH + "services/" + SVC_PHOTO[s["id"]] + ".jpg"
+SALON = lambda n: PH + "salon/" + n + ".jpg"
+SV_PH = lambda n: PH + "services/" + n + ".jpg"
+
 for s in services:
     if s["priceText"] is None:
         s["priceText"] = rub(s["price"]) + " ₽"
 
 data = {
-    "_readme": "Цены — реальный прайс салона (фото от 18.10.2026). ПРИМЕРНЫЕ: телефон, фото (Unsplash), отзывы. Меняйте здесь и запускайте build.py.",
+    "_readme": "Цены — реальный прайс салона (фото от 18.10.2026). Фото интерьера — обработанные снимки салона, фото услуг — сгенерированы в его интерьере. ПРИМЕРНЫЕ: отзывы. Меняйте здесь и запускайте build.py.",
     "salon": {
         "name": "Эйфория", "brandTop": "Beauty Salon", "brand": "EUPHORIA",
         "tagline": "Лазерная эпиляция · ресницы и брови · ногти · волосы",
@@ -133,15 +159,16 @@ data = {
         "description": "Салон красоты «Эйфория» в Реутове: лазерная эпиляция и выгодные комбо, наращивание ресниц, оформление бровей, маникюр и педикюр, в том числе в 4 руки, стрижки, окрашивание и уход за волосами. Ежедневно с 10:00 до 21:00. Запись онлайн, 320 м от остановки «Проспект Мира, 23»."
     },
     "photos": {
-        "hero": [{"id": P["interior"], "caption": "Наш зал"}, {"id": P["laser"], "caption": "Лазерная эпиляция"},
-                 {"id": P["lash"], "caption": "Наращивание ресниц"}, {"id": P["nails"], "caption": "Маникюр и педикюр"},
-                 {"id": P["haircut"], "caption": "Стрижки и окрашивание"}],
-        "gallery": [{"id": P["interior"], "label": "Зал"}, {"id": P["laser"], "label": "Лазер"}, {"id": P["lash2"], "label": "Ресницы"},
-                    {"id": P["brow"], "label": "Брови"}, {"id": P["nails"], "label": "Маникюр"}, {"id": P["pedi"], "label": "Педикюр"},
-                    {"id": P["haircut"], "label": "Стрижки"}, {"id": P["color"], "label": "Окрашивание"}, {"id": P["interior2"], "label": "Интерьер"}]
+        "hero": [{"id": SALON("cover"), "caption": "Наш зал"}, {"id": SALON("salon_5549"), "caption": "Кабинет лазерной эпиляции"},
+                 {"id": SALON("salon_5521"), "caption": "Ресницы и брови"}, {"id": SALON("salon_5528"), "caption": "Маникюр"},
+                 {"id": SALON("salon_5544"), "caption": "Педикюр"}, {"id": SALON("salon_5525"), "caption": "Стрижки и окрашивание"}],
+        "gallery": [{"id": SALON("salon_5540"), "label": "Зал"}, {"id": SALON("salon_5525"), "label": "Мойка"}, {"id": SALON("salon_5543"), "label": "Парикмахер"},
+                    {"id": SALON("salon_5536"), "label": "Лазер"}, {"id": SALON("salon_5550"), "label": "Кушетка"}, {"id": SALON("salon_5521"), "label": "Ресницы"},
+                    {"id": SALON("salon_5537"), "label": "Брови"}, {"id": SALON("salon_5528"), "label": "Маникюр"}, {"id": SALON("salon_5544"), "label": "Педикюр"},
+                    {"id": SALON("salon_5524"), "label": "Уход"}, {"id": SALON("salon_5559"), "label": "Зона ожидания"}]
     },
     "offer": {"badge": "Комбо эпиляции", "title": "Ноги, руки, бикини и подмышки за 7 000 ₽", "text": "Тело целиком за один визит. По отдельности вышло бы 10 500 ₽.",
-              "price": 7000, "oldPrice": 10500, "serviceId": "cb-full", "photo": P["laser2"],
+              "price": 7000, "oldPrice": 10500, "serviceId": "cb-full", "photo": SV_PH("laser_legs_1"),
               "promoLine": "Комбо лазерной эпиляции: выгода до 3 500 ₽", "heroBadge": "Выгода до 3 500 ₽ на комбо"},
     "services": services,
     "crossSell": {"laser": "cb-ab", "combo": "lz-forearms", "lashes": "brow-color", "brows": "lash-0", "nails": "pedi-gel",
@@ -151,17 +178,21 @@ data = {
                 {"name": "Дмитрий", "stars": 4, "date": "27 сентября", "text": "Стригусь здесь давно: быстро, недорого, рядом с домом."}],
     "stories": [
         {"file": "01-combo.png", "cover": "Тело целиком 7 000 ₽", "caption": "Комбо", "kicker": "Комбо эпиляции", "title": "Тело целиком за 7 000 ₽",
-         "text": "Ноги и руки полностью, тотальное бикини и подмышки. По отдельности вышло бы 10 500 ₽.", "cta": "Записаться на комбо", "serviceId": "cb-full", "photo": P["laser"],
+         "text": "Ноги и руки полностью, тотальное бикини и подмышки. По отдельности вышло бы 10 500 ₽.", "cta": "Записаться на комбо", "serviceId": "cb-full", "photo": SV_PH("laser_legs_0"), "bg": "story_laser_0.jpg",
          "lines": [["подмышки + тотальное бикини", "3 000 ₽"], ["лицо + подмышки + бикини", "3 500 ₽"], ["ноги до колен + подмышки + бикини", "4 000 ₽"], ["тело целиком", "7 000 ₽"]]},
         {"file": "02-lashes.png", "cover": "Ресницы от 3 300 ₽", "caption": "Ресницы", "kicker": "Наращивание ресниц", "title": "Ресницы от 3 300 ₽",
-         "text": "Классика, 1,5D, 2D, 2,5D, 3D и 4D. Объём подбираем под форму глаз.", "cta": "Выбрать объём", "serviceId": "lash-0", "photo": P["lash"],
+         "text": "Классика, 1,5D, 2D, 2,5D, 3D и 4D. Объём подбираем под форму глаз.", "cta": "Выбрать объём", "serviceId": "lash-0", "photo": SV_PH("lash_volume_0"), "bg": "lash_volume_0",
          "lines": [["классика", "3 300 ₽"], ["1,5D", "3 400 ₽"], ["2D", "3 600 ₽"], ["2,5D", "3 800 ₽"], ["3D", "4 100 ₽"], ["4D", "4 500 ₽"]]},
         {"file": "03-four-hands.png", "cover": "Маникюр и педикюр в 4 руки", "caption": "В 4 руки", "kicker": "Экономим ваше время", "title": "Маникюр и педикюр одновременно",
-         "text": "Два мастера работают в 4 руки. Маникюр от 1 000 ₽, педикюр от 2 500 ₽.", "cta": "Записаться", "serviceId": "mani-shellac", "photo": P["nails"],
+         "text": "Два мастера работают в 4 руки. Маникюр от 1 000 ₽, педикюр от 2 500 ₽.", "cta": "Записаться", "serviceId": "mani-shellac", "photo": SV_PH("manicure_gel_1"), "bg": "story_nails_1.jpg",
          "lines": [["маникюр", "1 000 ₽"], ["маникюр + шеллак", "2 500 ₽"], ["педикюр", "2 500 ₽"], ["педикюр + гель-лак", "3 000 ₽"]]},
         {"file": "04-brows.png", "cover": "Брови 1 500 ₽", "caption": "Брови", "kicker": "Оформление бровей", "title": "Брови за 1 500 ₽",
-         "text": "Художественное оформление. Коррекция пинцетом или ниткой 750 ₽, окрашивание 750 ₽.", "cta": "Записаться", "serviceId": "brow-art", "photo": P["brow"],
-         "lines": [["художественное оформление", "1 500 ₽"], ["коррекция пинцет / нитка", "750 ₽"], ["окрашивание бровей", "750 ₽"]]}],
+         "text": "Художественное оформление. Коррекция пинцетом или ниткой 750 ₽, окрашивание 750 ₽.", "cta": "Записаться", "serviceId": "brow-art", "photo": SV_PH("brow_shaping_1"), "bg": "brow_shaping_1",
+         "lines": [["художественное оформление", "1 500 ₽"], ["коррекция пинцет / нитка", "750 ₽"], ["окрашивание бровей", "750 ₽"]]},
+        {"file": "05-color.png", "cover": "Окрашивание", "caption": "Окрашивание", "kicker": "Окрашивание", "title": "AirTouch, балаяж, блонд",
+         "text": "Сложные техники, мелирование и коррекция корней. Цена зависит от длины волос.", "cta": "Записаться", "serviceId": "c-complex",
+         "photo": SV_PH("color_balayage_0"), "bg": "story_hair_0.jpg",
+         "lines": [["сложные техники", "от 13 000 ₽"], ["total blonde", "от 9 000 ₽"], ["мелирование", "от 3 000 ₽"], ["корни до 2 см", "2 500 ₽"]]}],
     "features": [["Лазерная эпиляция и комбо", "есть"], ["Наращивание ресниц", "есть"], ["Оформление бровей", "есть"], ["Маникюр и педикюр", "есть"],
                  ["Работа в 4 руки", "есть"], ["Женский и мужской зал", "есть"], ["Окрашивание и уход за волосами", "есть"],
                  ["Прокалывание ушей", "есть"], ["Онлайн-запись", "есть"]]

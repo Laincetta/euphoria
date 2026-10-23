@@ -33,6 +33,8 @@ if OUT.exists():
     shutil.rmtree(OUT)
 (IMP / "stories").mkdir(parents=True)
 (IMP / "brand-images").mkdir(parents=True)
+# Фото салона для раздела «Фото» в Яндекс Бизнесе (обработанные снимки 19.10.2026)
+shutil.copytree(ROOT / "photos" / "salon", IMP / "photos-salon")
 
 # Шрифты встраиваются в страницу и картинки (работает без интернета). Лицензия SIL OFL.
 RANGES = {"latin": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
@@ -97,7 +99,12 @@ try:
         page = browser.new_page(viewport={"width": 1080, "height": 1920})
         for st in data["stories"]:
             lines = "".join(f"<div><span>{html.escape(a)}</span><i></i><b>{html.escape(b)}</b></div>" for a, b in st.get("lines", []))
-            page.set_content(story_tpl.replace("__KICKER__", html.escape(st["kicker"])).replace("__TITLE__", html.escape(st["title"]))
+            bgf = st.get("bg")
+            bg = ""
+            if bgf:
+                bp = ROOT / "photos" / ("stories/" + bgf if bgf.endswith(".jpg") else "services/" + bgf + ".jpg")
+                bg = "data:image/jpeg;base64," + base64.b64encode(bp.read_bytes()).decode()
+            page.set_content(story_tpl.replace("__BG__", bg).replace("__KICKER__", html.escape(st["kicker"])).replace("__TITLE__", html.escape(st["title"]))
                              .replace("__TEXT__", html.escape(st["text"])).replace("__LINES__", lines))
             page.evaluate("document.fonts.ready")
             page.wait_for_timeout(200)
@@ -107,10 +114,15 @@ try:
              '<div class="frame" style="inset:40px;border-radius:50%"></div><div class="bt" style="font-size:52px">Beauty Salon</div>'
              '<div class="bn" style="font-size:118px;margin-top:6px">EUPHORIA</div>'),
             ("cover-1600x900.png", 1600, 900,
-             '<div class="frame" style="inset:36px;border-radius:24px"></div><div class="bt" style="font-size:46px">Beauty Salon</div>'
-             '<div class="bn" style="font-size:150px;margin-top:4px">EUPHORIA</div><div class="rule" style="width:260px;margin:40px 0 34px"></div>'
-             f'<div class="tl" style="font-size:38px">{html.escape(S["tagline"])}</div>'
-             '<div class="tl" style="font-size:32px;margin-top:22px">Реутов, Парковая ул., 8 · ежедневно 10–21</div>'),
+             '<img src="data:image/jpeg;base64,' + base64.b64encode((ROOT / "photos/salon/cover.jpg").read_bytes()).decode() + '" '
+             'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:60% 50%">'
+             '<div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,11,12,.9) 0%,rgba(11,11,12,.78) 38%,rgba(11,11,12,.25) 68%,rgba(11,11,12,.05) 100%)"></div>'
+             '<div class="frame" style="inset:36px;border-radius:24px"></div>'
+             '<div style="position:absolute;left:110px;top:50%;transform:translateY(-50%);text-align:left;width:760px">'
+             '<div class="bt" style="font-size:40px">Beauty Salon</div>'
+             '<div class="bn" style="font-size:132px;margin-top:4px">EUPHORIA</div><div class="rule" style="width:220px;margin:36px 0 30px"></div>'
+             f'<div class="tl" style="font-size:32px;color:#D6D2CD">{html.escape(S["tagline"])}</div>'
+             '<div class="tl" style="font-size:28px;margin-top:20px;color:#D6D2CD">Реутов, Парковая ул., 8 · ежедневно 10–21</div></div>'),
         ]
         jobs.append(("../../server/bot-avatar-640x640.png", 640, 640,
                      '<div class="bt" style="font-size:40px">Beauty Salon</div><div class="bn" style="font-size:96px;margin-top:4px">EUPHORIA</div>'

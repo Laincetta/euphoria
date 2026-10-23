@@ -4,7 +4,9 @@
 __FONTS__
 *{box-sizing:border-box}
 html,body{margin:0;width:1080px;height:1920px;overflow:hidden}
-body{background:radial-gradient(90% 55% at 50% 0%,#232326 0%,#0B0B0C 70%);color:#F4F2EE;font-family:"Comfortaa",sans-serif;position:relative}
+body{background:#0B0B0C;color:#F4F2EE;font-family:"Comfortaa",sans-serif;position:relative}
+.bg{position:absolute;inset:0;background-size:cover;background-position:center}
+.shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,11,12,.62) 0%,rgba(11,11,12,.80) 22%,rgba(11,11,12,.84) 70%,rgba(11,11,12,.72) 100%)}
 .frame{position:absolute;inset:44px;border:2px solid rgba(255,255,255,.14);border-radius:28px}
 .top{position:absolute;top:230px;left:0;right:0;text-align:center}
 .top .bt{font-weight:300;font-size:34px;letter-spacing:3px}
@@ -20,7 +22,7 @@ p{margin:0;font-family:"Montserrat",sans-serif;font-size:40px;line-height:1.5;co
 .lines b{font-weight:600;white-space:nowrap}
 .foot{position:absolute;left:110px;right:110px;bottom:350px;display:flex;justify-content:space-between;font-family:"Montserrat",sans-serif;font-size:34px;color:#B8B4B0;border-top:2px solid rgba(255,255,255,.18);padding-top:40px}
 </style></head>
-<body><div class="frame"></div><!-- сверху ~200px и снизу ~330px Яндекс закрывает своими кнопками: важное держим между ними -->
+<body><div class="bg" style="background-image:url(__BG__)"></div><div class="shade"></div><div class="frame"></div><!-- сверху ~200px и снизу ~330px Яндекс закрывает своими кнопками: важное держим между ними -->
 <div class="top"><div class="bt">Beauty Salon</div><div class="bn">EUPHORIA</div><div class="rule"></div></div>
 <div class="body"><span class="k">__KICKER__</span><h1>__TITLE__</h1><p>__TEXT__</p><div class="lines">__LINES__</div></div>
 <div class="foot"><span>Реутов, Парковая ул., 8</span><span>ежедневно 10–21</span></div>

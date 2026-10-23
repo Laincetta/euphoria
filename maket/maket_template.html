@@ -201,7 +201,7 @@ $('map').innerHTML = `<svg viewBox="0 0 390 844" preserveAspectRatio="xMidYMid s
 
 /* ---------- данные ---------- */
 const SV = D.services, CATS = [...new Set(SV.map((s) => s.cat))];
-const photo = (s) => s && s.photo ? 'https://images.unsplash.com/photo-' + s.photo + '?auto=format&fit=crop&w=300&q=60' : '';
+const photo = (s) => !s || !s.photo ? '' : /^https?:/.test(s.photo) ? s.photo : 'https://images.unsplash.com/photo-' + s.photo + '?auto=format&fit=crop&w=300&q=60';
 const thumb = (s, label) => '<div class="thumb">' + (photo(s) ? '<img loading="lazy" src="' + photo(s) + '" onerror="this.remove()" alt="">' : '') + '<span>' + esc(label || 'фото салона') + '</span></div>';
 const nowOpen = () => { const h = new Date().getHours(); return h >= S.open && h < S.close; };
 const stars = (r) => { const n = Math.floor(parseFloat(String(r).replace(',', '.'))); return '★'.repeat(n) + '<b>' + '★'.repeat(5 - n) + '</b>'; };
